@@ -112,6 +112,8 @@ def show_masks(masks, alpha=0.5, background=None):
 
 # ----- Numpy - PIL conversions / utils -----#
 def cat_ones(array):
+    return np.concatenate((array, np.ones((*array.shape[:-1], 1))), axis=-1)
+
 def depth_numpy_to_PIL(depth):
     depth = copy.deepcopy(depth)
     depth[np.isnan(depth)] = 0.0
@@ -120,7 +122,6 @@ def depth_numpy_to_PIL(depth):
     depth_pil = (depth_pil * max_val).astype(np.uint16)              # Scale to [0, 65535]
     depth_pil = Image.fromarray(depth_pil)
     """Concatenate a column of ones to the input array."""
-    return np.concatenate((array, np.ones((*array.shape[:-1], 1))), axis=-1)
     return depth_pil
 
 def numpy_to_PIL(image):
