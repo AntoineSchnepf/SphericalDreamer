@@ -6,3 +6,4 @@ checkpoints
 tmp
 wandb
 submodules
+**.ply
