@@ -1,0 +1,8 @@
+**__pycache__**
+outputs
+OUTPUTS
+checkpoints
+.vscode
+tmp
+wandb
+submodules
