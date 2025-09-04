@@ -10,15 +10,17 @@ import copy
 import cv2 
 from scipy.interpolate import griddata as interp_grid
 
-
+# -----Computer Vision ------#
 def fill_mask(mask):
     # mask: boolean NumPy array
     # Fill holes (False regions completely surrounded by True)
     return ndimage.binary_fill_holes(mask)
+
 def close_mask(mask, size=5):
     # size controls how aggressively to close gaps
     structure = np.ones((size, size), dtype=bool)
     return ndimage.binary_closing(mask, structure=structure)
+
 def erode_mask(mask, pixels=10):
     """
     Erode a boolean mask inward by `pixels`.
@@ -29,6 +31,7 @@ def erode_mask(mask, pixels=10):
     # Perform erosion
     eroded = ndimage.binary_erosion(mask, structure=selem)
     return eroded
+
 def dilate_mask(mask, pixels=10):
     """
     Dilate (expand) a boolean mask outward by `pixels`.
@@ -39,6 +42,34 @@ def dilate_mask(mask, pixels=10):
     # Perform dilatation
     dilated = ndimage.binary_dilation(mask, structure=selem)
     return dilated
+
+def seamless_blend(src, dst, mask):
+    """
+    Blend src into dst guided by mask (all PIL.Image objects).
+    src and dst must be the same size.
+    Returns a PIL.Image with seamless blending.
+    """
+    # Convert to OpenCV format
+    src_cv  = cv2.cvtColor(np.array(src), cv2.COLOR_RGB2BGR)
+    dst_cv  = cv2.cvtColor(np.array(dst), cv2.COLOR_RGB2BGR)
+    mask_cv = np.array(mask.convert("L"))
+
+    # Compute center of panoramic image
+    height, width = mask_cv.shape
+
+    # Blend
+    # -- v2 --
+    br = cv2.boundingRect(mask_cv) # bounding rect (x,y,width,height)
+    centerOfBR = (br[0] + br[2] // 2, br[1] + br[3] // 2)
+    blended_cv = cv2.seamlessClone(src_cv, dst_cv, mask_cv, centerOfBR, cv2.NORMAL_CLONE)
+
+    # -- v1 --
+    # center = (width//2, height//2)
+    # blended_cv = cv2.seamlessClone(src_cv, dst_cv, mask_cv, center, cv2.NORMAL_CLONE)
+
+
+    # Convert back to PIL
+    return Image.fromarray(cv2.cvtColor(blended_cv, cv2.COLOR_BGR2RGB))
 
 def show_masks(masks, alpha=0.5, background=None):
     """
@@ -79,10 +110,8 @@ def show_masks(masks, alpha=0.5, background=None):
     plt.show()
 
 
+# ----- Numpy - PIL conversions / utils -----#
 def cat_ones(array):
-    """Concatenate a column of ones to the input array."""
-    return np.concatenate((array, np.ones((*array.shape[:-1], 1))), axis=-1)
-
 def depth_numpy_to_PIL(depth):
     depth = copy.deepcopy(depth)
     depth[np.isnan(depth)] = 0.0
@@ -90,7 +119,36 @@ def depth_numpy_to_PIL(depth):
     max_val = 65535
     depth_pil = (depth_pil * max_val).astype(np.uint16)              # Scale to [0, 65535]
     depth_pil = Image.fromarray(depth_pil)
+    """Concatenate a column of ones to the input array."""
+    return np.concatenate((array, np.ones((*array.shape[:-1], 1))), axis=-1)
     return depth_pil
+
+def numpy_to_PIL(image):
+    """
+    Convert a numpy array to a PIL Image. Automatically converts to RGB or Gray-Scale PIL Images.
+    """
+    if image.ndim == 2 :
+        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
+    elif image.shape[2] == 1:
+        assert image.ndim == 3
+        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
+    else:
+        return Image.fromarray(np.uint8(image * 255.0)).convert('RGB')
+
+def PIL_to_numpy(pil_img):
+    """
+    Convert a PIL Image to a numpy array, normalized to [0, 1].
+    Handles both grayscale ('L') and RGB images.
+    """
+    arr = np.array(pil_img).astype(np.float32) / 255.0
+    
+    return arr
+
+def pil_mask_to_numpy_bool(pil_mask):
+    return np.array(pil_mask.convert("L")) > 0
+
+def numpy_bool_to_pil_mask(mask):
+    return Image.fromarray((mask * 255).astype(np.uint8)).convert("L")
 
 def overlay_mask(image, mask, alpha=0.5):
     """
@@ -120,27 +178,6 @@ def overlay_mask(image, mask, alpha=0.5):
     
     return overlay
 
-def numpy_to_PIL(image):
-    """
-    Convert a numpy array to a PIL Image. Automatically converts to RGB or Gray-Scale PIL Images.
-    """
-    if image.ndim == 2 :
-        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
-    elif image.shape[2] == 1:
-        assert image.ndim == 3
-        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
-    else:
-        return Image.fromarray(np.uint8(image * 255.0)).convert('RGB')
-
-def PIL_to_numpy(pil_img):
-    """
-    Convert a PIL Image to a numpy array, normalized to [0, 1].
-    Handles both grayscale ('L') and RGB images.
-    """
-    arr = np.array(pil_img).astype(np.float32) / 255.0
-    
-    return arr
-
 def get_1px_red_line(image):
 
     width = image.shape[1]
@@ -166,6 +203,22 @@ def tile_image(images, insert_red_lines=True):
             stack.append(get_1px_red_line(img))
     
     return Image.fromarray(np.vstack(stack))
+
+#----- 3D Geometry: equirectangular, spherical & cartesian coordinates ----- #
+
+# ERP image coordinate system:
+# ┌─────────────────────────► u 
+# │
+# │   [0,0]         [0, w-1]
+# │     ●────────────●
+# │     │            │
+# │     │            │
+# │     ●────────────●
+# │   [h-1, 0]      [h-1,w-1]
+# ▼
+# v 
+
+#[u, v] reprensent a point on the unit sphere. 
 
 def erp2sph_2D(erp_points:np.array, erp_image_height:int, erp_image_width:int):
     """
@@ -229,20 +282,6 @@ def sph2erp_2D(sph_point:np.array, erp_image_height:int, erp_image_width:int):
     erp_point = np.stack((erp_u, erp_v), axis=-1)
     return erp_point
 
-# ERP image coordinate system:
-# ┌─────────────────────────► u 
-# │
-# │   [0,0]         [0, w-1]
-# │     ●────────────●
-# │     │            │
-# │     │            │
-# │     ●────────────●
-# │   [h-1, 0]      [h-1,w-1]
-# ▼
-# v 
-
-#[u, v] actually reprensent a point on the unit sphere. 
-
 def sph2carte_3D(sph_point) :
     """
     Transform spherical coordinates to Cartesian coordinates.
@@ -278,78 +317,29 @@ def carte2sph_3D(carte_points):
     sph_points = np.stack((theta, phi, r), axis=-1)
     return sph_points
 
-def pil_mask_to_numpy_bool(pil_mask):
-    return np.array(pil_mask.convert("L")) > 0
-
-def numpy_bool_to_pil_mask(mask):
-    return Image.fromarray((mask * 255).astype(np.uint8)).convert("L")
-
-def show_masks(masks, alpha=0.5, background=None):
+def erp_to_world(points_2D_cam_erp, height, width, depth, pose, sphere_radius=1.0):
     """
-    Visualize several boolean masks on the same image with color overlaps.
-
-    Parameters
-    ----------
-    masks : list of np.ndarray
-        List of boolean arrays (all same shape).
-    alpha : float
-        Transparency for overlays.
-    background : np.ndarray or None
-        Optional grayscale/RGB image to show under masks.
+    Convert Equirectangular coordinates to world coordinates.
+    
+    Args:
+        points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
+        depth (np.array): Depth map of shape [...].
+        pose (np.array): Camera pose matrix of shape [4, 4].
+        sphere_radius (float): Radius of the sphere.
+    
+    Returns:
+       points_3D_world_carte: np.array w. shape [..., 3]. World coordinates. Convention X, Y, Z.
     """
-    H, W = masks[0].shape
-    # Assign distinct colors (cycle through tab colormap)
-    cmap = plt.cm.get_cmap("tab10", len(masks))
-    colors = [np.array(cmap(i)[:3]) for i in range(len(masks))]
-
-    # Background (default = white)
-    if background is None:
-        img = np.ones((H, W, 3), dtype=float)
-    else:
-        # Normalize background to 0-1 RGB
-        bg = np.array(background, dtype=float)
-        if bg.ndim == 2:
-            bg = np.stack([bg]*3, axis=-1)
-        bg = (bg - bg.min()) / (bg.max() - bg.min() + 1e-8)
-        img = bg
-
-    # Blend each mask color
-    for m, col in zip(masks, colors):
-        m3 = np.stack([m]*3, axis=-1)
-        img = np.where(m3, (1-alpha)*img + alpha*col, img)
-
-    plt.imshow(img)
-    plt.axis("off")
-    plt.show()
-
-def seamless_blend(src, dst, mask):
-    """
-    Blend src into dst guided by mask (all PIL.Image objects).
-    src and dst must be the same size.
-    Returns a PIL.Image with seamless blending.
-    """
-    # Convert to OpenCV format
-    src_cv  = cv2.cvtColor(np.array(src), cv2.COLOR_RGB2BGR)
-    dst_cv  = cv2.cvtColor(np.array(dst), cv2.COLOR_RGB2BGR)
-    mask_cv = np.array(mask.convert("L"))
-
-    # Compute center of panoramic image
-    height, width = mask_cv.shape
-
-    # Blend
-    # -- v2 --
-    br = cv2.boundingRect(mask_cv) # bounding rect (x,y,width,height)
-    centerOfBR = (br[0] + br[2] // 2, br[1] + br[3] // 2)
-    blended_cv = cv2.seamlessClone(src_cv, dst_cv, mask_cv, centerOfBR, cv2.NORMAL_CLONE)
-
-    # -- v1 --
-    # center = (width//2, height//2)
-    # blended_cv = cv2.seamlessClone(src_cv, dst_cv, mask_cv, center, cv2.NORMAL_CLONE)
+    assert np.all(points_2D_cam_erp.shape[:-1] == depth.shape)
+    points_2D_cam_sph = erp2sph_2D(points_2D_cam_erp, erp_image_height=height, erp_image_width=width)
+    r = depth * sphere_radius
+    points_3D_cam_sph = np.concatenate((points_2D_cam_sph, np.expand_dims(r, axis=-1)), axis=-1)
+    points_3D_cam_carte = sph2carte_3D(points_3D_cam_sph)
+    points_3D_world_carte = np.einsum('ij,...j->...i', pose, cat_ones(points_3D_cam_carte))[..., :3]
+    return points_3D_world_carte
 
 
-    # Convert back to PIL
-    return Image.fromarray(cv2.cvtColor(blended_cv, cv2.COLOR_BGR2RGB))
-
+# ---- Warping / Splatting functions -----
 def interpolate_with_flow(colors, depths, flow, mode='original'):
     """
     args:
@@ -405,27 +395,6 @@ def interpolate_with_flow(colors, depths, flow, mode='original'):
     ).reshape(height,width)
 
     return image_interp, depth_interp
-
-def erp_to_world(points_2D_cam_erp, height, width, depth, pose, sphere_radius=1.0):
-    """
-    Convert Equirectangular coordinates to world coordinates.
-    
-    Args:
-        points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
-        depth (np.array): Depth map of shape [...].
-        pose (np.array): Camera pose matrix of shape [4, 4].
-        sphere_radius (float): Radius of the sphere.
-    
-    Returns:
-       points_3D_world_carte: np.array w. shape [..., 3]. World coordinates. Convention X, Y, Z.
-    """
-    assert np.all(points_2D_cam_erp.shape[:-1] == depth.shape)
-    points_2D_cam_sph = erp2sph_2D(points_2D_cam_erp, erp_image_height=height, erp_image_width=width)
-    r = depth * sphere_radius
-    points_3D_cam_sph = np.concatenate((points_2D_cam_sph, np.expand_dims(r, axis=-1)), axis=-1)
-    points_3D_cam_carte = sph2carte_3D(points_3D_cam_sph)
-    points_3D_world_carte = np.einsum('ij,...j->...i', pose, cat_ones(points_3D_cam_carte))[..., :3]
-    return points_3D_world_carte
 
 def depth_aware_naive_splatting_vectorized(colors1, coord_cam1, coord_cam2, depth_cam2, height, width):
     """
@@ -567,6 +536,7 @@ def depth_aware_naive_splatting(colors1, coord_cam1, coord_cam2, depth_cam2, hei
 
     return warped_img, warped_depth, flow, visited_pixels
    
+# ----- TESTS -----
 if __name__ == "__main__":
     # test erp2sph_2D and sph2erp_2D
 
