@@ -9,16 +9,31 @@ from scipy import ndimage
 import copy
 import cv2 
 from scipy.interpolate import griddata as interp_grid
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+from sklearn.neighbors import kneighbors_graph, NearestNeighbors
+from sklearn.cluster import MiniBatchKMeans
+from scipy.sparse import diags
+from scipy.sparse.linalg import cg, splu
 
-# -----Computer Vision ------#
-def fill_mask(mask):
+
+
+# ---------------------------- #
+# ----- Computer Vision ------ #
+# ---------------------------- #
+
+def fill_mask(mask, flip=False):
     # mask: boolean NumPy array
-    # Fill holes (False regions completely surrounded by True)
+    # Fill holes in False regions completely surrounded by True, by swapping True to False in such areas
+    if flip:
+        return ~ndimage.binary_fill_holes(~mask)
     return ndimage.binary_fill_holes(mask)
 
-def close_mask(mask, size=5):
-    # size controls how aggressively to close gaps
+def close_mask(mask, size=5, flip=False):
+     # Close False regions mostly surrounded by True, by swapping True to False in such areas
     structure = np.ones((size, size), dtype=bool)
+    if flip:
+        return ~ndimage.binary_closing(~mask, structure=structure)
     return ndimage.binary_closing(mask, structure=structure)
 
 def erode_mask(mask, pixels=10):
@@ -71,6 +86,12 @@ def seamless_blend(src, dst, mask):
     # Convert back to PIL
     return Image.fromarray(cv2.cvtColor(blended_cv, cv2.COLOR_BGR2RGB))
 
+
+
+# ---------------------------- #
+# ------ Visualization ------- #
+# ---------------------------- #
+
 def show_masks(masks, alpha=0.5, background=None):
     """
     Visualize several boolean masks on the same image with color overlaps.
@@ -109,8 +130,80 @@ def show_masks(masks, alpha=0.5, background=None):
     plt.axis("off")
     plt.show()
 
+def depth_numpy_to_figure(depth, cmap='plasma', vmin=0.0, vmax=1.2, figsize=(12,12)):
+    """
+    Convert a depth map (numpy array) to a matplotlib figure for visualization.
+    
+    Parameters:
+    - depth: np.ndarray
+        2D array representing the depth map.
+    - cmap: str
+        Colormap to use for visualization.
+    - vmin: float
+        Minimum depth value for normalization.
+    - vmax: float
+        Maximum depth value for normalization.
+    
+    Returns:
+    - fig: matplotlib.figure.Figure
+        Figure object containing the visualized depth map.
+    """
+    fig, ax = plt.subplots(figsize=figsize)
 
+    # Normalize depth values to [vmin, vmax]
+    plt.imshow(depth, cmap=cmap)
+    plt.colorbar(ax=ax, label='Depth')
+    plt.axis('off')
+    plt.tight_layout()
+
+    return fig
+
+def xyz_to_rgb(pts, r=None, coord_type='cartesian'):
+    """
+    Map 3D points to RGB colors based on position.
+    
+    Parameters
+    ----------
+    pts : array-like (..., 3)
+        Either Cartesian coordinates [x, y, z] or spherical [r, theta, phi].
+        If spherical, `coord_type` must be 'spherical'.
+    r : float, optional
+        Reference radius for normalization. If None, it's estimated from |x|, |y|, |z|.
+    coord_type : str, optional
+        'cartesian' (default) or 'spherical'
+        - 'cartesian': pts[...,0]=x, pts[...,1]=y, pts[...,2]=z
+        - 'spherical': pts[...,0]=radius, pts[...,1]=theta, pts[...,2]=phi
+          (theta: colatitude [0,π], phi: azimuth [-π,π])
+    
+    Returns
+    -------
+    colors : np.ndarray (..., 3)
+        RGB values in [0, 1]
+    """
+    pts = np.asarray(pts, dtype=float)
+
+    if coord_type == 'spherical':
+        pts_carte = sph2carte_3D(pts)
+        x, y, z = pts_carte[..., 0], pts_carte[..., 1], pts_carte[..., 2]
+    elif coord_type == 'cartesian':
+        x, y, z = pts[..., 0], pts[..., 1], pts[..., 2]
+    else:
+        raise ValueError("coord_type must be 'cartesian' or 'spherical'.")
+
+    if r is None:
+        # estimate bounding radius (max absolute coord)
+        r = np.max(np.abs([x, y, z]))
+
+    R = (x + r) / (2 * r)
+    G = (y + r) / (2 * r)
+    B = (z + r) / (2 * r)
+
+    return np.stack([R, G, B], axis=-1)
+
+# ------------------------------------------ #
 # ----- Numpy - PIL conversions / utils -----#
+# ------------------------------------------ #
+
 def cat_ones(array):
     return np.concatenate((array, np.ones((*array.shape[:-1], 1))), axis=-1)
 
@@ -205,10 +298,15 @@ def tile_image(images, insert_red_lines=True):
     
     return Image.fromarray(np.vstack(stack))
 
-#----- 3D Geometry: equirectangular, spherical & cartesian coordinates ----- #
 
-# ERP image coordinate system:
-# ┌─────────────────────────► u 
+
+# --------------------------------------------------------------------------- #
+# ----- 3D Geometry: equirectangular, spherical & cartesian coordinates ----- #
+# --------------------------------------------------------------------------- #
+
+# ERP coordinate system:
+#
+# ┌─────────────────────────► u in [0, w-1]
 # │
 # │   [0,0]         [0, w-1]
 # │     ●────────────●
@@ -217,10 +315,21 @@ def tile_image(images, insert_red_lines=True):
 # │     ●────────────●
 # │   [h-1, 0]      [h-1,w-1]
 # ▼
-# v 
+# v in [0, h-1]
 
 #[u, v] reprensent a point on the unit sphere. 
 
+# Spherical coordinate system:
+#   
+# ^ θ (elevation) in [-π/2, π/2]
+# │
+# │
+# │
+# │
+# │
+# ────────────────► φ (azimuth) in [-π, π[
+
+# basics
 def erp2sph_2D(erp_points:np.array, erp_image_height:int, erp_image_width:int):
     """
     Convert the point from erp image pixel location to spherical coordinate.
@@ -318,29 +427,388 @@ def carte2sph_3D(carte_points):
     sph_points = np.stack((theta, phi, r), axis=-1)
     return sph_points
 
-def erp_to_world(points_2D_cam_erp, height, width, depth, pose, sphere_radius=1.0):
+# cam2world, world2cam and cam2cam functions
+def cam_sph2world_3D(points_3D_cam_sph, pose):
     """
-    Convert Equirectangular coordinates to world coordinates.
+    Convert camera spherical coordinates to world coordinates.
     
     Args:
-        points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
-        depth (np.array): Depth map of shape [...].
+        points_3D_cam_sph (np.array): Camera spherical coordinates of shape [..., 3].
         pose (np.array): Camera pose matrix of shape [4, 4].
-        sphere_radius (float): Radius of the sphere.
     
     Returns:
        points_3D_world_carte: np.array w. shape [..., 3]. World coordinates. Convention X, Y, Z.
     """
-    assert np.all(points_2D_cam_erp.shape[:-1] == depth.shape)
-    points_2D_cam_sph = erp2sph_2D(points_2D_cam_erp, erp_image_height=height, erp_image_width=width)
-    r = depth * sphere_radius
-    points_3D_cam_sph = np.concatenate((points_2D_cam_sph, np.expand_dims(r, axis=-1)), axis=-1)
     points_3D_cam_carte = sph2carte_3D(points_3D_cam_sph)
     points_3D_world_carte = np.einsum('ij,...j->...i', pose, cat_ones(points_3D_cam_carte))[..., :3]
     return points_3D_world_carte
 
+def world2cam_sph_3D(points_3D_world_carte, pose):
+    """
+    Convert world coordinates to camera spherical coordinates.
+    
+    Args:
+        points_3D_world_carte (np.array): World coordinates of shape [..., 3].
+        pose (np.array): Camera pose matrix of shape [4, 4].
+    
+    Returns:
+       points_3D_cam_sph: np.array w. shape [..., 3]. Camera spherical coordinates. Convention theta, phi, r.
+    """
+    points_3D_cam_carte = np.einsum('ij,...j->...i', np.linalg.inv(pose), cat_ones(points_3D_world_carte))[..., :3]
+    points_3D_cam_sph = carte2sph_3D(points_3D_cam_carte)
+    return points_3D_cam_sph
 
-# ---- Warping / Splatting functions -----
+def world2cam_carte_3D(points_3D_world_carte, pose): 
+    """
+    Convert world coordinates to camera Cartesian coordinates.
+    
+    Args:
+        points_3D_world_carte (np.array): World coordinates of shape [..., 3].
+        pose (np.array): Camera pose matrix of shape [4, 4].
+    
+    Returns:
+       points_3D_cam_carte: np.array w. shape [..., 3]. Camera Cartesian coordinates. Convention X, Y, Z.
+    """
+    points_3D_cam_carte = np.einsum('ij,...j->...i', np.linalg.inv(pose), cat_ones(points_3D_world_carte))[..., :3]
+    return points_3D_cam_carte
+
+
+# depth2 functions (assumes depth is in [0,1] with shape [H,W])
+def get_canonical_sph_pixels(height, width):
+    points_2D_erp = np.stack((np.meshgrid(range(width), range(height))), axis=-1) 
+    points_2D_sph = erp2sph_2D(points_2D_erp, erp_image_height=height, erp_image_width=width)
+    return points_2D_sph
+
+def depth2cam_sph(depth, sphere_radius, height, width):
+    points_2D_sph = get_canonical_sph_pixels(height, width)
+    assert depth.shape[0] == height and depth.shape[1] == width, f"Depth shape {depth.shape} does not match height {height} and width {width}"
+    points_3D_cam_sph = np.concatenate((points_2D_sph, np.expand_dims(depth * sphere_radius, axis=-1)), axis=-1)
+    return points_3D_cam_sph
+
+def depth2cam_carte(depth, sphere_radius, height, width):
+    points_3D_cam_sph = depth2cam_sph(depth, sphere_radius, height, width)
+    points_3D_cam_carte = sph2carte_3D(points_3D_cam_sph)
+    return points_3D_cam_carte
+
+def depth2world(depth, pose, sphere_radius, height, width):
+    points_3D_cam_carte = depth2cam_carte(depth, sphere_radius, height, width)
+    points_3D_world_carte = np.einsum('ij,...j->...i', pose, cat_ones(points_3D_cam_carte))[..., :3]
+    return points_3D_world_carte
+
+# def cam_erp2cam_sph_3D(points_2D_cam_erp, height, width, depth, sphere_radius=1.0):
+#     """
+#     Convert Equirectangular coordinates to camera spherical coordinates.
+    
+#     Args:
+#         points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
+#         depth (np.array): Depth map of shape [...].
+#         sphere_radius (float): Radius of the sphere.
+    
+#     Returns:
+#        points_3D_cam_sph: np.array w. shape [..., 3]. Camera spherical coordinates. Convention theta, phi, r.
+#     """
+#     assert np.all(points_2D_cam_erp.shape[:-1] == depth.shape)
+#     points_2D_cam_sph = erp2sph_2D(points_2D_cam_erp, erp_image_height=height, erp_image_width=width)
+#     r = depth * sphere_radius
+#     points_3D_cam_sph = np.concatenate((points_2D_cam_sph, np.expand_dims(r, axis=-1)), axis=-1)
+#     return points_3D_cam_sph
+
+# def cam_erp2world_3D(points_2D_cam_erp, height, width, depth, pose, sphere_radius=1.0):
+#     """
+#     Convert Equirectangular coordinates to world coordinates.
+    
+#     Args:
+#         points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
+#         depth (np.array): Depth map of shape [...].
+#         pose (np.array): Camera pose matrix of shape [4, 4].
+#         sphere_radius (float): Radius of the sphere.
+    
+#     Returns:
+#        points_3D_world_carte: np.array w. shape [..., 3]. World coordinates. Convention X, Y, Z.
+#     """
+#     points_3D_cam_sph = cam_erp_to_cam_sph_3D(points_2D_cam_erp, height, width, depth, sphere_radius)
+#     points_3D_world_carte = cam_sph_to_world_3D(points_3D_cam_sph, pose)
+#     return points_3D_world_carte
+
+
+
+# ---------------------------------------- #
+# ---- Warping / Splatting functions ----- #
+# ---------------------------------------- #
+
+def prepare_coords(coord_cam2, height, width, **additional_data):
+    """
+    Prepare coordinates for splatting:
+    - Round to nearest integer pixel
+    - Keep only those that fall inside the target frame
+    All additional data (colors, depths, etc.) are filtered accordingly.
+    coord_cam2 and additional_data must be numpy arrays of shape [N, ...].
+    """
+    assert coord_cam2 is not None
+    colors = additional_data.get('colors')
+    coord_cam1 = additional_data.get('coord_cam1')
+    depth_cam2 = additional_data.get('depth_cam2')
+
+    # Round target coordinates to nearest integer pixel (u -> x/col, v -> y/row)
+    u = coord_cam2[:, 0]
+    v = coord_cam2[:, 1]
+    u_r = np.rint(u).astype(np.int32)
+    v_r = np.rint(v).astype(np.int32)
+
+    # Keep only those that fall inside the target frame
+    in_bounds = (u_r >= 0) & (u_r < width) & (v_r >= 0) & (v_r < height)
+    assert np.any(in_bounds), "No points project inside the target frame!"
+
+    # Restrict to valid points
+    out = {
+        'in_bounds': in_bounds,
+        'u_r': u_r[in_bounds],
+        'v_r': v_r[in_bounds],
+        'u_float': u[in_bounds],
+        'v_float': v[in_bounds],
+    }
+
+    # Prepare additional optional data
+    if colors is not None:
+        out['colors'] = colors[in_bounds]
+    if depth_cam2 is not None:
+        out['depth_cam2'] = depth_cam2[in_bounds].astype(np.float32)
+    if coord_cam1 is not None:
+        out['coord_cam1'] = coord_cam1[in_bounds]
+
+    return out
+
+def get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width):
+    """
+    z-buffer splatting to find winning points per pixel.
+    args:
+        - depth_cam2: np.array of shape [N,] with float values
+        - coord_cam2: np.array of shape [N, 2] with float values
+    """
+
+    # Prepare coordinates (rounding, in-bounds filtering)
+    out = prepare_coords(coord_cam2, height, width, depth_cam2=depth_cam2)
+
+    u_r = out['u_r']
+    v_r = out['v_r']
+    depth_cam2 = out['depth_cam2']
+
+    # Linearized target indices (row-major)
+    tgt_lin = (v_r.astype(np.int64) * width + u_r.astype(np.int64))
+
+    # Resolve collisions per target pixel with z-buffer: keep the *nearest* depth
+    order = np.lexsort((depth_cam2, tgt_lin))        # primary: tgt_lin, secondary: depth (ascending)
+    tgt_sorted = tgt_lin[order]
+    _, first_idx = np.unique(tgt_sorted, return_index=True)
+    winners = order[first_idx]
+
+    # Winners' data
+    return winners
+
+def splatting_and_interpolation(colors, depth_cam2, coord_cam2, height, width, interpolation_mode='original'):
+    """
+    This function takes as input: 
+        - `colors` an array of colors (N, 3) in [0-1]
+        - `depth_cam2` an array of depth values (N,) in [0-1]
+        - `coord_cam2` an array of 2D coordinates in the image frame (N, 2) in pixel coordinates
+    From this information, is returned 
+        - the warped_image (no interpolation)
+        - the warped_depth (no interpolation)
+        - the binary mask of visited pixels
+        - the interpolated_image (with interpolation)
+        - the interpolated_depth (with interpolation)
+    """
+    #TODO: better docstring
+
+    # Basic checks
+    assert colors.shape[-1] == 3
+    assert coord_cam2.shape[-1] == 2
+    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape
+
+    # Flatten to [N, ...]
+    colors   = colors.reshape((-1, 3))
+    coord_cam2 = coord_cam2.reshape((-1, 2))
+    depth_cam2 = depth_cam2.reshape((-1,))
+
+    # Prepare coordinates (rounding, in-bounds filtering)
+    out = prepare_coords(coord_cam2, height, width, colors=colors, depth_cam2=depth_cam2)
+
+    # --- I. Z-buffer Splatting to find winners ----
+    winners = get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width)
+
+    # Winners' data
+    u_win_r = out['u_r'][winners]
+    v_win_r = out['v_r'][winners]
+    depths_win = out['depth_cam2'][winners]
+    colors_win = out['colors'][winners]   
+    u_win_f = out['u_float'][winners]       
+    v_win_f = out['v_float'][winners]        
+    # ---- II. Allocate outputs -----
+    # 1. Visited mask
+    visited = np.zeros((height, width), dtype=bool)
+    visited[v_win_r, u_win_r] = True
+
+    # 2. Naive without Interpolation
+    warped_img   = np.zeros((height, width, 3), dtype=np.float32)
+    warped_depth = np.full((height, width), 0.0, dtype=np.float32)
+    warped_img[v_win_r, u_win_r]   = colors_win
+    warped_depth[v_win_r, u_win_r] = depths_win
+
+    # 3. With Interpolation
+    grid = np.stack((np.meshgrid(range(width), range(height))), axis=-1).reshape(-1, 2).astype(np.float32)
+    if interpolation_mode == 'original':
+        points_ = np.stack((u_win_f, v_win_f), axis=-1).astype(np.float32)
+    elif interpolation_mode == 'rounded':
+        points_ = np.stack((u_win_r, v_win_r), axis=-1).astype(np.float32)
+    else:
+        raise ValueError(f"Unknown interpolation mode: {interpolation_mode}")
+    
+    image_interp = interp_grid(
+        points_,
+        colors_win,
+        grid, 
+        method='linear', 
+        # fill_value=0
+    ).reshape(height,width,3)
+
+    depth_interp = interp_grid(
+        points_,
+        depths_win,
+        grid,
+        method='linear',
+        # fill_value=0
+    ).reshape(height,width)
+
+
+
+    return warped_img, warped_depth, image_interp, depth_interp, visited
+
+def depth_aware_naive_splatting_vectorized(colors, coord_cam1, coord_cam2, depth_cam2, height, width):
+    """
+    This functions computes a new image, at a new camera location, based on:
+        (i) a set coordinates of colored points in the new image: `coord_cam2` (float values)
+        (ii) corresponding colors: `colors`
+        (iii) corresponding depths: `depth_cam2`
+    This functions rounds the float values, to obtain proper pixel location. If there are multiple pixels for a location, 
+    the point that is the nearest to the camera is chosen. This models occlusions. 
+
+    It is a simple form of splatting, using a z-buffer. 
+
+    args:
+        img: np.array with values in [0,1]. Shape [H, W, 3] or [HW, 3].Colors of the pixels at canonical locations(
+            [[[0,0], ..., [0,W]],
+            ...
+            [H,0], ..., [H,W]]]
+        ) in the source image, i.e. the source image itself
+        coord_cam2: pixel coordinates in the new image (float values). Shape [H, W, 2] or [HW, 2].
+        depth_cam2: np.array. Depth at new camera location (float values). Shape [H, W] or [HW].
+    """
+    # Basic checks
+    assert colors.shape[-1] == 3
+    assert coord_cam2.shape[-1] == 2
+    assert coord_cam1.shape[-1] == 2
+    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
+
+    # Flatten to [N, ...]
+    colors   = colors.reshape((-1, 3))
+    coord_cam1 = coord_cam1.reshape((-1, 2))
+    coord_cam2 = coord_cam2.reshape((-1, 2))
+    depth_cam2 = depth_cam2.reshape((-1,))
+
+    # Prepare coordinates (rounding, in-bounds filtering)
+    out = prepare_coords(coord_cam2, height, width, colors=colors, coord_cam1=coord_cam1, depth_cam2=depth_cam2)
+    # z-buffer splatting to find winners
+    winners = get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width)
+
+    # Winners' data
+    u_win_r = out['u_r'][winners]
+    v_win_r = out['v_r'][winners]
+    depths_win = out['depth_cam2'][winners]
+    colors_win = out['colors'][winners]
+    coord1_win = out['coord_cam1'][winners]      # (a, b) source coordinates
+    u_win_f = out['u_float'][winners]        # unrounded u for flow key
+    v_win_f = out['v_float'][winners]        # unrounded v for flow key
+
+    # Allocate outputs
+    warped_img   = np.zeros((height, width, 3), dtype=np.float32)
+    warped_depth = np.full((height, width), np.inf, dtype=np.float32)
+    visited      = np.zeros((height, width), dtype=bool)
+
+    # Scatter winners into outputs
+    warped_img[v_win_r, u_win_r]   = colors_win
+    warped_depth[v_win_r, u_win_r] = depths_win
+    visited[v_win_r, u_win_r]      = True
+
+    # Flow mapping: map exact (float u, float v) -> (a, b) from coord_cam1
+    # Convert to native Python floats for dict keys/values
+    flow = {(float(uf), float(vf)): (ab[0], ab[1])
+            for uf, vf, ab in zip(u_win_f, v_win_f, coord1_win)}
+
+    return warped_img, warped_depth, flow, visited
+
+def depth_aware_naive_splatting(colors, coord_cam1, coord_cam2, depth_cam2, height, width):
+    """
+    This functions computes a new image, at a new camera location, based on:
+        (i) a set coordinates of colored points in the new image: `coord_cam2` (float values)
+        (ii) corresponding colors: `colors`
+        (iii) corresponding depths: `depth_cam2`
+    This functions rounds the float values, to obtain proper pixel location. If there are multiple pixels for a location, 
+    the point that is the nearest to the camera is chosen. This models occlusions. 
+
+    It is a simple form of splatting, using a z-buffer. 
+
+    args:
+        img: np.array with values in [0,1]. Shape [H, W, 3] or [HW, 3].Colors of the pixels at canonical locations(
+            [[[0,0], ..., [0,W]],
+            ...
+            [H,0], ..., [H,W]]]
+        ) in the source image, i.e. the source image itself
+        coord_cam2: pixel coordinates in the new image (float values). Shape [H, W, 2] or [HW, 2].
+        depth_cam2: np.array. Depth at new camera location (float values). Shape [H, W] or [HW].
+    """
+    assert colors.shape[-1] == 3
+    assert coord_cam2.shape[-1] == 2
+    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
+
+    colors = colors.reshape((-1, 3))
+    coord_cam1 = coord_cam1.reshape((-1, 2))
+    coord_cam2 = coord_cam2.reshape((-1, 2))
+    depth_cam2 = depth_cam2.reshape((-1,))
+
+    warped_img = np.zeros(shape=(height, width, 3), dtype=np.float32)
+    warped_depth = np.full(shape=(height, width) , fill_value=np.inf, dtype=np.float32)
+    visited_pixels = np.zeros(shape=(height, width), dtype=bool)  # keep track of visited pixels
+    # more_than_once_visited = np.zero(shape=(height, width), dtype=bool)  # keep track of pixels visited more than once
+    # visited_count = 0
+
+
+    flow_mapping = {}
+    # Iterate over all the 3D points 
+    for k in range(len(coord_cam2)):
+        (a,b) = coord_cam1[k] # (a, b) represent the coordinates of the current point in the source image
+        (u,v) = coord_cam2[k] # (u, v) represent the coordinates of the current point in the target image
+
+        u_ = int(round(u))  
+        v_ = int(round(v))
+
+        color = colors[k]
+        depth2 = depth_cam2[k]
+        
+        if 0 <= u_ < width and 0 <= v_ < height:
+
+            # /!\ Reference frame for an image inverts horizontal and vertical axis
+            if warped_depth[v_, u_] > depth2 : # If this points is closer than previous
+                warped_depth[v_, u_] = depth2 
+                warped_img[v_, u_] = color 
+                visited_pixels[v_, u_] = True
+                flow_mapping[(u_, v_)] = ((a, b), (u, v))
+
+    flow = {}
+    for ((a, b), (u, v)) in flow_mapping.values():
+        flow[(float(u), float(v))] = (a, b)
+
+    return warped_img, warped_depth, flow, visited_pixels
+
 def interpolate_with_flow(colors, depths, flow, mode='original'):
     """
     args:
@@ -397,146 +865,499 @@ def interpolate_with_flow(colors, depths, flow, mode='original'):
 
     return image_interp, depth_interp
 
-def depth_aware_naive_splatting_vectorized(colors1, coord_cam1, coord_cam2, depth_cam2, height, width):
+
+# ----------------------------- #
+# ----- Utility functions ----- #
+# ----------------------------- #
+
+def get_norm_vector(v):
+    """Normalize a vector or an array of vectors."""
+    norm = np.linalg.norm(v, axis=-1, keepdims=True)
+    return v / (norm + 1e-10)
+
+def normalize_angle(a):
+    """Map any angle a (scalar or array) to [0, 2π)."""
+    return np.mod(a, 2*np.pi)
+
+def angle_diff(phi1, phi2):
     """
-    Vectorized depth-aware splatting with a z-buffer.
-    Supports inputs shaped [H, W, *] or flattened [HW, *].
+    Signed difference phi1 - phi2, wrapped to (-π, π].
+    Works with scalars or numpy arrays.
     """
-    # Basic checks
-    assert colors1.shape[-1] == 3
-    assert coord_cam2.shape[-1] == 2
-    assert coord_cam1.shape[-1] == 2
-    assert colors1.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
+    return ( (phi1 - phi2 + np.pi) % (2*np.pi) ) - np.pi
 
-    # Flatten to [N, ...]
-    colors1   = colors1.reshape((-1, 3))
-    coord_cam1 = coord_cam1.reshape((-1, 2))
-    coord_cam2 = coord_cam2.reshape((-1, 2))
-    depth_cam2 = depth_cam2.reshape((-1,))
-
-    # Round target coordinates to nearest integer pixel (u -> x/col, v -> y/row)
-    u = coord_cam2[:, 0]
-    v = coord_cam2[:, 1]
-    u_r = np.rint(u).astype(np.int32)
-    v_r = np.rint(v).astype(np.int32)
-
-    # Keep only those that fall inside the target frame
-    in_bounds = (u_r >= 0) & (u_r < width) & (v_r >= 0) & (v_r < height)
-    if not np.any(in_bounds):
-        warped_img   = np.zeros((height, width, 3), dtype=np.float32)
-        warped_depth = np.full((height, width), np.inf, dtype=np.float32)
-        visited      = np.zeros((height, width), dtype=bool)
-        return warped_img, warped_depth, {}, visited
-
-    # Restrict to valid points
-    u_r = u_r[in_bounds]
-    v_r = v_r[in_bounds]
-    depths = depth_cam2[in_bounds].astype(np.float32)
-    colors = colors1[in_bounds]
-    coord1 = coord_cam1[in_bounds]
-    u_float = u[in_bounds]
-    v_float = v[in_bounds]
-
-    # Linearized target indices (row-major)
-    tgt_lin = (v_r.astype(np.int64) * width + u_r.astype(np.int64))
-
-    # Resolve collisions per target pixel with z-buffer: keep the *nearest* depth
-    order = np.lexsort((depths, tgt_lin))        # primary: tgt_lin, secondary: depth (ascending)
-    tgt_sorted = tgt_lin[order]
-    _, first_idx = np.unique(tgt_sorted, return_index=True)
-    winners = order[first_idx]
-
-    # Winners' data
-    u_win_r = u_r[winners]
-    v_win_r = v_r[winners]
-    depths_win = depths[winners]
-    colors_win = colors[winners]
-    coord1_win = coord1[winners]      # (a, b) source coordinates
-    u_win_f = u_float[winners]        # unrounded u for flow key
-    v_win_f = v_float[winners]        # unrounded v for flow key
-
-    # Allocate outputs
-    warped_img   = np.zeros((height, width, 3), dtype=np.float32)
-    warped_depth = np.full((height, width), np.inf, dtype=np.float32)
-    visited      = np.zeros((height, width), dtype=bool)
-
-    # Scatter winners into outputs
-    warped_img[v_win_r, u_win_r]   = colors_win
-    warped_depth[v_win_r, u_win_r] = depths_win
-    visited[v_win_r, u_win_r]      = True
-
-    # Flow mapping: map exact (float u, float v) -> (a, b) from coord_cam1
-    # Convert to native Python floats for dict keys/values
-    flow = {(float(uf), float(vf)): (ab[0], ab[1])
-            for uf, vf, ab in zip(u_win_f, v_win_f, coord1_win)}
-
-    return warped_img, warped_depth, flow, visited
-
-def depth_aware_naive_splatting(colors1, coord_cam1, coord_cam2, depth_cam2, height, width):
+def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
     """
-    This functions computes a new image, at a new camera location, based on:
-        (i) a set coordinates of colored points in the new image: `coord_cam2` (float values)
-        (ii) corresponding colors: `colors1`
-        (iii) corresponding depths: `depth_cam2`
-    This functions rounds the float values, to obtain proper pixel location. If there are multiple pixels for a location, 
-    the point that is the nearest to the camera is chosen. This models occlusions. 
+    Test if angle(s) phi lie in the modular interval [start, end] modulo 2π.
 
-    It is a simple form of splatting, using a z-buffer. 
+    - All angles are treated modulo 2π.
+    - Interval semantics:
+        closed='both'   -> inclusive on both ends
+        closed='left'   -> inclusive start, open end
+        closed='right'  -> open start, inclusive end
+        closed='neither'-> open on both ends
 
-    args:
-        img: np.array with values in [0,1]. Shape [H, W, 3] or [HW, 3].Colors of the pixels at canonical locations(
-            [[[0,0], ..., [0,W]],
-            ...
-            [H,0], ..., [H,W]]]
-        ) in the source image, i.e. the source image itself
-        coord_cam2: pixel coordinates in the new image (float values). Shape [H, W, 2] or [HW, 2].
-        depth_cam2: np.array. Depth at new camera location (float values). Shape [H, W] or [HW].
-
-        Modif 20 Aug: img, coord_cam2 and depth_cam2 can be flattened
+    Works for wrap-around intervals (when start > end after normalization).
     """
-    assert colors1.shape[-1] == 3
-    assert coord_cam2.shape[-1] == 2
-    assert colors1.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
+    phi  = normalize_angle(phi)
+    a    = normalize_angle(start)
+    b    = normalize_angle(end)
 
-    colors1 = colors1.reshape((-1, 3))
-    coord_cam1 = coord_cam1.reshape((-1, 2))
-    coord_cam2 = coord_cam2.reshape((-1, 2))
-    depth_cam2 = depth_cam2.reshape((-1,))
+    # Comparators with endpoint control
+    if closed == 'both':
+        le = lambda x, y: x <= y + atol
+        ge = lambda x, y: x + atol >= y
+    elif closed == 'left':
+        le = lambda x, y: x < y - atol
+        ge = lambda x, y: x + atol >= y
+    elif closed == 'right':
+        le = lambda x, y: x <= y + atol
+        ge = lambda x, y: x > y + atol
+    elif closed == 'neither':
+        le = lambda x, y: x < y - atol
+        ge = lambda x, y: x > y + atol
+    else:
+        raise ValueError("closed must be 'both', 'left', 'right', or 'neither'")
 
-    warped_img = np.zeros(shape=(height, width, 3), dtype=np.float32)
-    warped_depth = np.full(shape=(height, width) , fill_value=np.inf, dtype=np.float32)
-    visited_pixels = np.zeros(shape=(height, width), dtype=bool)  # keep track of visited pixels
-    # more_than_once_visited = np.zero(shape=(height, width), dtype=bool)  # keep track of pixels visited more than once
-    # visited_count = 0
+    if a <= b:
+        # Normal (non-wrapping) interval
+        return ge(phi, a) & le(phi, b)
+    else:
+        # Wrapping interval (crosses 0): [a, 2π) ∪ [0, b]
+        return ge(phi, a) | le(phi, b)
 
 
-    flow_mapping = {}
-    # Iterate over all the 3D points 
-    for k in range(len(coord_cam2)):
-        (a,b) = coord_cam1[k] # (a, b) represent the coordinates of the current point in the source image
-        (u,v) = coord_cam2[k] # (u, v) represent the coordinates of the current point in the target image
 
-        u_ = int(round(u))  
-        v_ = int(round(v))
 
-        color = colors1[k]
-        depth2 = depth_cam2[k]
+# --------------------------------------------#
+# ------- Topological transformations ------- #
+# --------------------------------------------#
+
+def get_sphere_tangent(phi0, sph_points):
+        """
+        args:
+        :phi0: float, radians: point on the sphere where the tangent is computed
+        :sph_points: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates. Convention: theta, phi, r
         
-        if 0 <= u_ < width and 0 <= v_ < height:
+        returns: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates, projected onto the tangent at phi0
+        """
 
-            # /!\ Reference frame for an image inverts horizontal and vertical axis
-            if warped_depth[v_, u_] > depth2 : # If this points is closer than previous
-                warped_depth[v_, u_] = depth2 
-                warped_img[v_, u_] = color 
-                visited_pixels[v_, u_] = True
-                flow_mapping[(u_, v_)] = ((a, b), (u, v))
+        theta, phi, r = sph_points[..., 0], sph_points[..., 1], sph_points[..., 2]
 
-    flow = {}
-    for ((a, b), (u, v)) in flow_mapping.values():
-        flow[(float(u), float(v))] = (a, b)
+        # normal expression at phi0:
+        X0 = r * np.cos(theta) * np.cos(phi0)
+        Y0 = r * np.cos(theta) * np.sin(phi0)
+        Z0 = r * np.sin (theta)
+        P0 = np.stack([X0, Y0, Z0], axis=-1)  # shape [3]
 
-    return warped_img, warped_depth, flow, visited_pixels
-   
+        # derivative w.r.t. phi at phi0:
+        dX_dphi0 = -r * np.cos(theta) * np.sin(phi0)
+        dY_dphi0 =  r * np.cos(theta) * np.cos(phi0)
+        dZ_dphi0 =  0.0 * r * np.sin (theta)
+        dP0 = np.stack([dX_dphi0, dY_dphi0, dZ_dphi0], axis=-1)  # shape [3]
+
+        # get projection of (X,Y,Z) onto the tangent at phi0:
+        delta = angle_diff(phi, phi0) # shape [...]
+        projection = P0[None, :] + dP0[None, :] * delta[..., None]  # shape [..., 3]
+        #shape: [..., 3] = shape: [1, 3] + shape: [1, 3] * shape: [..., 1]
+        return carte2sph_3D(projection)
+
+def unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi):
+    """
+    Unfold points in the spherical coordinates, by projecting them onto the sphere tangents
+    at the boundary of a cone of angle delta around forward_sph.
+    All arguments expected in spherical coordinates (theta, phi, r).
+    The returned points are also in spherical coordinates.
+    """
+    # a. Get the two boundary angles
+    phi_forward = forward_sph[1]
+    phi1 = normalize_angle(phi_forward + delta / 2)
+    phi2 = normalize_angle(phi_forward - delta / 2)
+
+    # b. gets arcs
+    arc1_bounds = (phi_forward, phi1)
+    arc2_bounds = (phi2, phi_forward)
+    arc1_mask = in_interval_mod(pts_sph[..., 1], arc1_bounds[0], arc1_bounds[1], closed='both')
+    arc2_mask = in_interval_mod(pts_sph[..., 1], arc2_bounds[0], arc2_bounds[1], closed='both')
+    other_mask = ~(arc1_mask | arc2_mask)
+
+    arc1_pts_sph = pts_sph[arc1_mask]
+    arc2_pts_sph = pts_sph[arc2_mask]
+
+    arc1_proj_pts_sph = get_sphere_tangent(phi1, arc1_pts_sph)
+    arc2_proj_pts_sph = get_sphere_tangent(phi2, arc2_pts_sph)
+    other_pts_sph = pts_sph[other_mask]
+
+
+    res_sph = np.zeros_like(pts_sph)
+    res_sph[arc1_mask] = arc1_proj_pts_sph
+    res_sph[arc2_mask] = arc2_proj_pts_sph
+    res_sph[other_mask] = other_pts_sph
+
+    return res_sph
+
+def remove_points_within_cone(forward_sph, pts_sph, delta=np.pi/2, eps=1e-12):
+    """
+    Remove points inside a cone of aperture `delta` (radians) centered on `direction`,
+    optionally restricted to points within a sphere of radius `radius` around `center`.
+
+    Args:
+        pts_sph (..., 3): point cloud in camera frame (Spherical).
+        forward_sph (3,): cone axis in camera frame (Spherical, doesn't need to be normalized).
+        delta (float): cone angle in radians. Points with angle <= delta / 2 are removed.
+    Returns:
+        pts_cut_sph (M, 3): (flattened) points outside the cone (and within radius if provided).
+        mask_keep (...,): boolean mask of kept points.
+    """
+
+    points = sph2carte_3D(pts_sph)          # (N, 3)
+    direction = sph2carte_3D(forward_sph) # (3,)
+
+    # Normalize the cone axis
+    d_norm = np.linalg.norm(direction)
+    if d_norm < eps:
+        raise ValueError("`direction` must be non-zero.")
+    d = direction / d_norm
+
+    # Translate to local coordinates
+    r = np.linalg.norm(points, axis=-1)                     # (N,)
+    assert np.allclose(r, pts_sph[..., 2])
+
+    # Cosine of angle to direction: cos(theta) = (v · d) / ||v||
+    # Safe divide to handle points exactly at the center.
+    cos_theta = np.einsum('...j,j->...', points, d) / np.maximum(r, eps)
+    cos_hdelta = np.cos(delta / 2)
+
+    # Points inside the cone have theta <= delta  <=>  cos(theta) >= cos(delta)
+    in_cone = cos_theta >= cos_hdelta
+
+    # Keep: NOT in_cone
+    mask_keep = ~in_cone
+    pts_cut_sph = pts_sph[mask_keep]
+    return pts_cut_sph, mask_keep
+
+def unfold_points_on_cylinder(forward_sph, pts_sph, base_radius=1.0, eps=1e-12):
+    """
+    Unfolds the northern hemisphere of a (possibly perturbed) sphere into a cylinder.
+
+    Inputs
+    ------
+    forward_sph : (3,) array-like
+        Direction vector (in spherical coordinates [theta, phi, r])
+        indicating the 'up' or 'north' direction of the deformation.
+        Only the orientation (theta, phi) is used; r is ignored.
+    pts_sph : (..., 3) array-like
+        Input points in spherical coordinates [theta, phi, R],
+        where theta ∈ [-pi/2, pi/2] (elevation),
+              phi   ∈ [-pi, pi]     (azimuth),
+              R     > 0             (radius).
+    base_radius : float or None
+        Reference radius R0 for the target cylinder. If None, uses median(R).
+    eps : float
+        Small value to avoid numerical issues.
+
+    Returns
+    -------
+    pts_prime_sph : (..., 3)
+        Deformed points in spherical coordinates [theta, phi, R],
+        in the same world frame and convention as the input.
+    """
+
+    # --- Helpers: rotation & coordinate transforms ---
+    def _rotation_align_a_to_b(a, b, eps=1e-12):
+        """Compute rotation matrix that aligns vector a to vector b."""
+        a = np.asarray(a, float)
+        b = np.asarray(b, float)
+        a /= max(np.linalg.norm(a), eps)
+        b /= max(np.linalg.norm(b), eps)
+        v = np.cross(a, b)
+        c = float(np.clip(np.dot(a, b), -1.0, 1.0))
+        s = np.linalg.norm(v)
+        if s < eps:
+            if c > 0:
+                return np.eye(3)
+            # 180° rotation: choose any orthogonal axis
+            axis = np.array([1., 0., 0.]) if abs(a[0]) <= 0.9 else np.array([0., 1., 0.])
+            v = np.cross(a, axis)
+            v /= max(np.linalg.norm(v), eps)
+            vx, vy, vz = v
+            K = np.array([[0, -vz,  vy],
+                          [vz,  0, -vx],
+                          [-vy, vx,  0]])
+            return np.eye(3) + 2 * K @ K
+        v /= s
+        vx, vy, vz = v
+        K = np.array([[0, -vz,  vy],
+                      [vz,  0, -vx],
+                      [-vy, vx,  0]])
+        return np.eye(3) + K * s + K @ K * (1 - c)
+
+    # --- Convert direction (spherical -> cartesian) ---
+    from math import cos, sin
+    theta_f, phi_f, r_f = forward_sph
+    forward_dir = np.array([
+        cos(theta_f) * cos(phi_f),
+        cos(theta_f) * sin(phi_f),
+        sin(theta_f),
+    ])
+
+    # --- Align the forward direction to +Z ---
+    R_world_to_z = _rotation_align_a_to_b(forward_dir, np.array([0., 0., 1.]))
+    R_z_to_world = R_world_to_z.T
+
+    # --- Convert input spherical to cartesian in world frame ---
+    P_cart_world = sph2carte_3D(pts_sph)
+    # Align to +Z frame
+    P_cart_aligned = np.tensordot(P_cart_world, R_world_to_z.T, axes=([P_cart_world.ndim - 1], [0]))
+    # Convert to spherical (aligned frame)
+    S_aligned = carte2sph_3D(P_cart_aligned)
+
+    theta = S_aligned[..., 0]  # elevation [-pi/2, pi/2]
+    phi   = S_aligned[..., 1]
+    R     = S_aligned[..., 2]
+
+    # --- Compute base radius and perturbations ---
+    R0 = np.median(R) if base_radius is None else float(base_radius)
+    delta = R - R0
+
+    # Split north/south hemispheres (θ≥0 → north)
+    north = theta >= 0
+    south = ~north
+
+    Pp_aligned = np.empty_like(P_cart_aligned)
+
+    # --- SOUTH: unchanged (keep spherical radius R0 + δ) ---
+    if np.any(south):
+        sph_south = np.stack([theta[south], phi[south], R0 + delta[south]], axis=-1)
+        Pp_aligned[south] = sph2carte_3D(sph_south)
+
+    # --- NORTH: unfold onto a cylinder ---
+    if np.any(north):
+        thetan = theta[north]
+        phin   = phi[north]
+        dn     = delta[north]
+
+        # Cylinder base (aligned frame): radius = R0, height = R0 * theta
+        x0 = R0 * np.cos(phin)
+        y0 = R0 * np.sin(phin)
+        z0 = R0 * thetan
+
+        # Apply radius variation (δ) along cylinder normal (cos φ, sin φ, 0)
+        xn = x0 + dn * np.cos(phin)
+        yn = y0 + dn * np.sin(phin)
+        zn = z0
+        Pp_aligned[north] = np.stack([xn, yn, zn], axis=-1)
+
+    # --- Rotate back to world frame and convert to spherical ---
+    Pp_world = np.tensordot(Pp_aligned, R_z_to_world.T, axes=([Pp_aligned.ndim - 1], [0]))
+    pts_prime_sph = carte2sph_3D(Pp_world)
+    return pts_prime_sph
+
+def open_world(forward_sph, pts_sph, mode='cut+cylinder', delta_cut=np.pi/2):
+    assert mode in ['wall', 'cut+wall', 'cut+cylinder']
+    if mode == 'wall':
+        pts_opened = unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi)
+        mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
+    elif mode == 'cut+wall':
+        pts_opened = unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi)
+        _, mask_keep = remove_points_within_cone(forward_sph, pts_sph, delta=delta_cut)
+    elif mode == 'cut+cylinder':
+        pts_opened = unfold_points_on_cylinder(forward_sph, pts_sph, base_radius=1.0)
+        _, mask_keep = remove_points_within_cone(forward_sph, pts_sph, delta=delta_cut)
+
+    return pts_opened[mask_keep], pts_opened, mask_keep
+
+# ------------------------------------------- #
+# ---- Harmonic Deformation of 3D Points ---- #
+# ------------------------------------------- #
+
+# 1. Build Laplacian
+def build_graph_laplacian(P, k=10, symmetrize=True):
+    G = kneighbors_graph(P, n_neighbors=k, mode='distance',
+                         include_self=False, n_jobs=-1)
+    W = G.tocoo(copy=True)
+    W.data = 1.0 / (W.data + 1e-12)
+    if symmetrize:
+        W = 0.5*(W + W.T)
+    deg = np.asarray(W.sum(axis=1)).ravel()
+    L = diags(deg) - W.tocsr()
+    return L
+
+# 2. Constraint subsampling (mask-based)
+def subsample_constraints(mask_boundary, target_boundary, mask_fixed,
+                          every=5, max_fixed=5000, seed=0):
+    rng = np.random.default_rng(seed)
+
+    idx_boundary = np.where(mask_boundary)[0]
+    idx_fixed = np.where(mask_fixed)[0]
+
+    # Boundary: keep every Nth point
+    idx_boundary_sub = idx_boundary[::every]
+    target_boundary_sub = target_boundary[::every]
+
+    # Fixed: random subsample if too many
+    if len(idx_fixed) > max_fixed:
+        sel = rng.choice(len(idx_fixed), max_fixed, replace=False)
+        idx_fixed_sub = idx_fixed[sel]
+    else:
+        idx_fixed_sub = idx_fixed
+
+    return idx_boundary_sub, target_boundary_sub, idx_fixed_sub
+
+# 3. Coarse set selection
+def kmeans_downsample(P, n_samples, seed=0):
+    mbk = MiniBatchKMeans(n_clusters=n_samples,
+                          batch_size=4096, max_iter=100,
+                          n_init="auto", random_state=seed)
+    mbk.fit(P)
+    centers = mbk.cluster_centers_
+    nn = NearestNeighbors(n_neighbors=1).fit(P)
+    _, idx = nn.kneighbors(centers)
+    return np.unique(idx[:,0])
+
+# 4. Hard Dirichlet solver
+def harmonic_deform_dirichlet(P, idx_fixed, idx_boundary, target_boundary, k=10, solver='cg'):
+    N = P.shape[0]
+    B = np.unique(np.concatenate([idx_fixed, idx_boundary]))
+    M = np.setdiff1d(np.arange(N), B, assume_unique=False)
+
+    L = build_graph_laplacian(P, k=k)
+
+    # Displacements on boundary
+    uB = np.zeros((len(B), 3))
+    if len(idx_boundary) > 0:
+        pos_in_B = {b:i for i,b in enumerate(B)}
+        jj = np.array([pos_in_B[i] for i in idx_boundary], dtype=int)
+        uB[jj,:] = (target_boundary - P[idx_boundary])
+
+    L_MM = L[M][:, M]
+    L_MB = L[M][:, B]
+    rhs  = - L_MB @ uB
+
+    U = np.zeros_like(P)
+    if solver == 'cg':
+        for d in range(3):
+            uM, info = cg(L_MM, rhs[:,d], atol=0, rtol=1e-6, maxiter=2000)
+            if info != 0:
+                lu = splu(L_MM.tocsc())
+                uM = lu.solve(rhs[:,d])
+            U[M,d] = uM
+        U[B,:] = uB
+    else:
+        lu = splu(L_MM.tocsc())
+        for d in range(3):
+            U[M,d] = lu.solve(rhs[:,d])
+        U[B,:] = uB
+    return P + U
+
+# 5. Prolongation (IDW)
+def prolongate_displacements(P_full, P_coarse, U_coarse, m=3, power=2):
+    nbr = NearestNeighbors(n_neighbors=m).fit(P_coarse)
+    d, j = nbr.kneighbors(P_full, return_distance=True)
+    w = 1.0 / (d**power + 1e-12)
+    w /= w.sum(axis=1, keepdims=True)
+    U_full = (w[...,None] * U_coarse[j]).sum(axis=1)
+    return U_full
+
+# 6. Pipeline (mask-based)
+def harmonic_deform_pipeline(P, mask_fixed, mask_boundary, target_boundary,
+                             n_coarse=10000, every=5, max_fixed=5000,
+                             k=10, m=3, power=2, seed=0):
+    """
+    - Subsample constraints
+    - Build coarse set of mobile points with k-means
+    - Solve Dirichlet system on coarse subset
+    - Prolongate displacements back to full set
+    """
+    idx_boundary_sub, target_boundary_sub, idx_fixed_sub = subsample_constraints(
+        mask_boundary, target_boundary, mask_fixed, every, max_fixed, seed)
+
+    must_keep = np.unique(np.concatenate([idx_fixed_sub, idx_boundary_sub]))
+    free_pool = np.setdiff1d(np.arange(len(P)), must_keep)
+    if len(free_pool) > 0 and n_coarse > len(must_keep):
+        idx_free = kmeans_downsample(P[free_pool],
+                                     n_samples=n_coarse - len(must_keep),
+                                     seed=seed)
+        coarse_idx = np.concatenate([must_keep, free_pool[idx_free]])
+    else:
+        coarse_idx = must_keep
+
+    # Deformation on coarse subset
+    P_coarse = P[coarse_idx]
+    map_to_coarse = -np.ones(len(P), dtype=int)
+    map_to_coarse[coarse_idx] = np.arange(len(coarse_idx))
+    idx_fixed_c = map_to_coarse[idx_fixed_sub]
+    idx_boundary_c = map_to_coarse[idx_boundary_sub]
+    target_boundary_c = target_boundary_sub
+    P_coarse_def = harmonic_deform_dirichlet(
+        P_coarse, idx_fixed_c, idx_boundary_c, target_boundary_c, k=k, solver='cg')
+    U_coarse = P_coarse_def - P_coarse
+
+    # Prolongation to full set
+    U_full = prolongate_displacements(P, P_coarse, U_coarse, m=m, power=power)
+    P_def = P + U_full
+    return P_def, coarse_idx
+
+
+
+# ------------------------------------------------ #
+# ----- Generate Images with color gradients ----- #
+# ------------------------------------------------ #
+def _part1by1(n: np.ndarray) -> np.ndarray:
+    """
+    Vectorized bit interleaving helper: expand 16-bit values so that the bits
+    occupy the even positions (..b15 0 b14 0 ... b1 0 b0 0).
+    Works for n in [0, 65535], we’ll only use up to 12 bits (0..4095).
+    """
+    n = n.astype(np.uint32) & 0x0000FFFF
+    n = (n | (n << 8))  & 0x00FF00FF
+    n = (n | (n << 4))  & 0x0F0F0F0F
+    n = (n | (n << 2))  & 0x33333333
+    n = (n | (n << 1))  & 0x55555555
+    return n
+
+def morton_ids(width: int, height: int) -> np.ndarray:
+    """
+    Return a (H, W) array of unique 24-bit IDs in Morton (Z-order).
+    Constraint for uniqueness within 24-bit RGB:
+      width * height <= 16,777,216 (2^24)
+    For the Morton mapping below, best keep width, height <= 4096 (12 bits each).
+    """
+    if width * height > (1 << 24):
+        raise ValueError("width*height must be ≤ 16,777,216 (24-bit RGB limit).")
+    if width  > 4096 or height > 4096:
+        raise ValueError("Use width/height ≤ 4096 to stay within 12 bits for Morton interleave.")
+
+    # Coordinate grids
+    y = np.arange(height, dtype=np.uint32)[:, None]  # (H,1)
+    x = np.arange(width,  dtype=np.uint32)[None, :]  # (1,W)
+
+    # Interleave bits: morton = interleave(y,x) -> y bits in odd positions, x in even (or vice-versa)
+    my = _part1by1(y)
+    mx = _part1by1(x)
+    morton = (my << 1) | mx  # (H,W), up to 24 bits when x,y <= 12 bits
+    return morton
+
+def unique_gradient_image(width=1024, height=1024) -> Image.Image:
+    """
+    Create an image where each pixel has a unique RGB value, arranged so
+    colors vary smoothly in both directions (Z-order gradient).
+    """
+    ids = morton_ids(width, height)  # (H,W) uint32
+
+    # Map 24-bit id -> RGB
+    R = (ids >> 16).astype(np.uint8)
+    G = (ids >> 8 ).astype(np.uint8)
+    B = (ids      ).astype(np.uint8)
+
+    img = np.dstack([R, G, B])
+    return Image.fromarray(img, mode="RGB")
+
+
+
+
+
+
 # ----- TESTS -----
 if __name__ == "__main__":
     # test erp2sph_2D and sph2erp_2D
@@ -566,7 +1387,14 @@ if __name__ == "__main__":
     recovered_sph_points_3D = carte2sph_3D(carte_points_3D)
     assert np.allclose(sph_points_3D, recovered_sph_points_3D), "Error: recovered spherical points do not match original spherical points"
 
-    print("all tests run successfully")
+    # test cam_sph2world_3D and world2cam_sph_3D
+    points_3D_cam_sph = np.random.rand(100, 3) * np.array([1, np.pi/2, 5])  # random 3D spherical points
+    pose = np.eye(4)
+    translation = np.array([1, 2, 3])
+    pose[:3, 3] = translation
+    points_3D_world_carte = cam_sph2world_3D(points_3D_cam_sph, pose)
+    recovered_points_3D_cam_sph = world2cam_sph_3D(points_3D_world_carte, pose)
+    assert np.allclose(points_3D_cam_sph, recovered_points_3D_cam_sph), "Error: recovered camera spherical points do not match original camera spherical points"
 
 
     # test that numpy_to_PIL and PIL_to_numpy as loss-free
@@ -585,4 +1413,65 @@ if __name__ == "__main__":
     recovered_image = np.array(pil_image2) 
     assert np.all(image == recovered_image)
 
+    # test topological transoforations
+    perturn_scale = 0.0
+    N_th, N_ph = 400, 400
+    theta = np.linspace(-np.pi/2, np.pi/2, N_th)
+    phi = np.linspace(-np.pi, np.pi, N_ph, endpoint=False)
+    TH, PH = np.meshgrid(theta, phi, indexing='ij')
+    r = np.ones_like(TH)
+    r += perturn_scale * (2 * np.random.rand(*r.shape) - 1.0)
+    pts_sph = np.stack([TH, PH, r], axis=-1).reshape(-1, 3)
 
+    forward = np.array([1.0, -1.0, 0.0])
+    forward_sph = carte2sph_3D(forward)
+
+
+
+    pts_unfold_sph1 = unfold_points_on_walls(forward_sph, pts_sph)    
+    pts_cut_sph, mask_keep = remove_points_within_cone(forward_sph, pts_sph)
+    pts_unfold_cylinder = unfold_points_on_cylinder(forward_sph, pts_sph)
+    pts_cut_and_unfold_cylinder = unfold_points_on_cylinder(forward_sph, pts_cut_sph)
+
+    # Optional: make 3D axes have equal aspect (so spheres look like spheres)
+    def set_equal_aspect_3d(ax):
+        xlim = ax.get_xlim3d(); ylim = ax.get_ylim3d(); zlim = ax.get_zlim3d()
+        xmid = np.mean(xlim); ymid = np.mean(ylim); zmid = np.mean(zlim)
+        radius = max((xlim[1]-xlim[0]), (ylim[1]-ylim[0]), (zlim[1]-zlim[0])) / 2
+        ax.set_xlim3d([xmid - radius, xmid + radius])
+        ax.set_ylim3d([ymid - radius, ymid + radius])
+        ax.set_zlim3d([zmid - radius, zmid + radius])
+
+
+    fig, axes = plt.subplots(3, 4, figsize=(25, 15), subplot_kw={'projection': '3d'})
+
+    axes[0,0].scatter(*sph2carte_3D(pts_sph).T, s=1, c=xyz_to_rgb(pts_sph, coord_type='spherical'))
+    axes[0,0].set_title("Original points")
+    set_equal_aspect_3d(axes[0,0])
+
+    axes[1,0].scatter(*sph2carte_3D(pts_cut_sph).T, s=1, c=xyz_to_rgb(pts_cut_sph, coord_type='spherical'))
+    axes[1,0].set_title("Cut points")
+    set_equal_aspect_3d(axes[1,0])
+
+    axes[1,1].scatter(*sph2carte_3D(pts_unfold_sph1).T, s=1, c=xyz_to_rgb(pts_unfold_sph1, coord_type='spherical'))
+    axes[1,1].set_title("Unfolded points")
+    set_equal_aspect_3d(axes[1,1])
+        
+
+    axes[1,2].scatter(*sph2carte_3D(pts_unfold_cylinder).T, s=1, c=xyz_to_rgb(pts_unfold_cylinder, coord_type='spherical'))
+    axes[1,2].set_title("Cylinder points")
+    set_equal_aspect_3d(axes[1,2])
+
+    axes[1,3].scatter(*sph2carte_3D(pts_cut_and_unfold_cylinder).T, s=1, c=xyz_to_rgb(pts_cut_and_unfold_cylinder, coord_type='spherical'))
+    axes[1,3].set_title("Cut + Cylinder points")
+    set_equal_aspect_3d(axes[1,3])
+
+    for jj, mode in enumerate(['wall', 'cut+wall', 'cut+cylinder']):
+        pts_opened_sph, _, _ = open_world(forward_sph, pts_sph, mode=mode, delta_cut=2*np.pi/3)
+        ax = axes[2, jj]
+        ax.scatter(*sph2carte_3D(pts_opened_sph).T, s=1, c=xyz_to_rgb(pts_opened_sph, coord_type='spherical'))
+        ax.set_title(f"Open world ({mode})")
+        set_equal_aspect_3d(ax)
+
+    plt.tight_layout()
+    plt.show()
