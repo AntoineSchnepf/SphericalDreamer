@@ -930,7 +930,7 @@ def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
 
 
 # --------------------------------------------#
-# ------- Topological transformations ------- #
+# ---- World Opening transformations ----- #
 # --------------------------------------------#
 
 def get_sphere_tangent(phi0, sph_points):
@@ -962,7 +962,7 @@ def get_sphere_tangent(phi0, sph_points):
         #shape: [..., 3] = shape: [1, 3] + shape: [1, 3] * shape: [..., 1]
         return carte2sph_3D(projection)
 
-def unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi):
+def unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi):
     """
     Unfold points in the spherical coordinates, by projecting them onto the sphere tangents
     at the boundary of a cone of angle delta around forward_sph.
@@ -996,7 +996,7 @@ def unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi):
 
     return res_sph
 
-def remove_points_within_cone(forward_sph, pts_sph, delta=np.pi/2, eps=1e-12):
+def remove_points_within_cone(pts_sph, forward_sph, delta=np.pi/2, eps=1e-12):
     """
     Remove points inside a cone of aperture `delta` (radians) centered on `direction`,
     optionally restricted to points within a sphere of radius `radius` around `center`.
@@ -1036,7 +1036,7 @@ def remove_points_within_cone(forward_sph, pts_sph, delta=np.pi/2, eps=1e-12):
     pts_cut_sph = pts_sph[mask_keep]
     return pts_cut_sph, mask_keep
 
-def unfold_points_on_cylinder(forward_sph, pts_sph, base_radius=1.0, eps=1e-12):
+def unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0, eps=1e-12):
     """
     Unfolds the northern hemisphere of a (possibly perturbed) sphere into a cylinder.
 
@@ -1153,17 +1153,112 @@ def unfold_points_on_cylinder(forward_sph, pts_sph, base_radius=1.0, eps=1e-12):
     pts_prime_sph = carte2sph_3D(Pp_world)
     return pts_prime_sph
 
-def open_world(forward_sph, pts_sph, mode='cut+cylinder', delta_cut=np.pi/2):
-    assert mode in ['wall', 'cut+wall', 'cut+cylinder']
+def filter_points_by_plane(pts_sph, forward_sph, cut_distance):
+    """
+    Remove points that lie *behind* the plane orthogonal to `forward`
+    and located at a distance `cut_distance` along that direction.
+
+    Parameters
+    ----------
+    pts_sph : np.ndarray, shape (..., 3)
+        Point cloud in spherical coordinates (theta, phi, r).
+        Convention: theta=elevation, phi=azimuth, r=radius
+    forward : np.ndarray, shape (3,)
+        Direction vector of the plane's normal.
+    cut_distance : float
+        Distance of the plane along `forward` (in same units as points).
+
+    Returns
+    -------
+    kept_pts_sph : np.ndarray, shape (M, 3)
+        Points that are *in front of or on* the plane, i.e. (p · f̂) >= cut_distance.
+    mask_keep : np.ndarray of bool, shape (N,)
+        Boolean mask of kept points.
+    """
+
+    # Convert spherical → Cartesian
+    pts_xyz = sph2carte_3D(pts_sph)
+
+    # Normalize direction vector
+    forward = sph2carte_3D(forward_sph)
+    norm = np.linalg.norm(forward)
+    if norm == 0:
+        raise ValueError("`forward` vector must be non-zero.")
+    forward_hat = forward / norm
+
+    # Project each point onto the forward direction
+    proj = pts_xyz @ forward_hat  # dot product
+
+    # Keep points in behing of (or on) the plane
+    mask_keep = (proj <= cut_distance)
+
+    # Select those points and return them in spherical coords
+    kept_xyz = pts_xyz[mask_keep]
+    kept_pts_sph = carte2sph_3D(kept_xyz)
+
+    return kept_pts_sph, mask_keep
+
+def compute_cut_distance_based_on_percentile(pts_sph, forward_sph, percentile=90):
+    """
+    Compute the cut distance along `forward_sph` such that a given percentile
+    of points lie behind the cutting plane.
+
+    Parameters
+    ----------
+    pts_sph : np.ndarray, shape (..., 3)
+        Point cloud in spherical coordinates (theta, phi, r).
+        Convention: theta=elevation, phi=azimuth, r=radius
+    forward_sph : np.ndarray, shape (3,)
+        Direction vector of the plane's normal.
+    percentile : float
+        Percentile (0-100) of points to be behind the cutting plane.
+
+    Returns
+    -------
+    cut_distance : float
+        Distance along `forward_sph` such that the specified percentile of points
+        lie behind the cutting plane.
+    """
+
+    # Convert spherical → Cartesian
+    pts_xyz = sph2carte_3D(pts_sph)
+
+    # Normalize direction vector
+    forward = sph2carte_3D(forward_sph)
+    norm = np.linalg.norm(forward)
+    if norm == 0:
+        raise ValueError("`forward` vector must be non-zero.")
+    forward_hat = forward / norm
+
+    # Project each point onto the forward direction
+    proj = pts_xyz @ forward_hat  # dot product
+
+    # Compute and return the desired percentile
+    cut_distance = np.percentile(proj, percentile)
+    return cut_distance
+
+
+def open_world(forward_sph, pts_sph, mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
+    assert mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
     if mode == 'wall':
-        pts_opened = unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi)
+        pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
         mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
     elif mode == 'cut+wall':
-        pts_opened = unfold_points_on_walls(forward_sph, pts_sph, delta=np.pi)
-        _, mask_keep = remove_points_within_cone(forward_sph, pts_sph, delta=delta_cut)
+        pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
     elif mode == 'cut+cylinder':
-        pts_opened = unfold_points_on_cylinder(forward_sph, pts_sph, base_radius=1.0)
-        _, mask_keep = remove_points_within_cone(forward_sph, pts_sph, delta=delta_cut)
+        pts_opened = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif mode == 'remove_within_cone':
+        pts_opened = pts_sph
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif mode == 'straight_cut':
+        if cut_distance is None:
+            cut_distance = compute_cut_distance_based_on_percentile(
+                pts_sph, forward_sph, percentile=cut_distance_percentile
+            )
+        pts_opened = pts_sph
+        _, mask_keep = filter_points_by_plane(pts_sph, forward_sph, cut_distance=cut_distance)
 
     return pts_opened[mask_keep], pts_opened, mask_keep
 
@@ -1173,7 +1268,7 @@ def open_world(forward_sph, pts_sph, mode='cut+cylinder', delta_cut=np.pi/2):
 
 # 1. Build Laplacian
 def build_graph_laplacian(P, k=10, symmetrize=True):
-    G = kneighbors_graph(P, n_neighbors=k, mode='distance',
+    G = kneighbors_graph(P, n_neighbors=k, opening_mode='distance',
                          include_self=False, n_jobs=-1)
     W = G.tocoo(copy=True)
     W.data = 1.0 / (W.data + 1e-12)
@@ -1413,7 +1508,7 @@ if __name__ == "__main__":
     recovered_image = np.array(pil_image2) 
     assert np.all(image == recovered_image)
 
-    # test topological transoforations
+    # --- existing setup (your code above this) ---
     perturn_scale = 0.0
     N_th, N_ph = 400, 400
     theta = np.linspace(-np.pi/2, np.pi/2, N_th)
@@ -1426,13 +1521,6 @@ if __name__ == "__main__":
     forward = np.array([1.0, -1.0, 0.0])
     forward_sph = carte2sph_3D(forward)
 
-
-
-    pts_unfold_sph1 = unfold_points_on_walls(forward_sph, pts_sph)    
-    pts_cut_sph, mask_keep = remove_points_within_cone(forward_sph, pts_sph)
-    pts_unfold_cylinder = unfold_points_on_cylinder(forward_sph, pts_sph)
-    pts_cut_and_unfold_cylinder = unfold_points_on_cylinder(forward_sph, pts_cut_sph)
-
     # Optional: make 3D axes have equal aspect (so spheres look like spheres)
     def set_equal_aspect_3d(ax):
         xlim = ax.get_xlim3d(); ylim = ax.get_ylim3d(); zlim = ax.get_zlim3d()
@@ -1442,34 +1530,35 @@ if __name__ == "__main__":
         ax.set_ylim3d([ymid - radius, ymid + radius])
         ax.set_zlim3d([zmid - radius, zmid + radius])
 
+    # --- plotting section fix ---
+    methods = ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
 
-    fig, axes = plt.subplots(3, 4, figsize=(25, 15), subplot_kw={'projection': '3d'})
+    # +1 row for the original point cloud
+    n_rows = 1 + 1  # first row = original, second row = all methods
+    n_cols = len(methods)
 
-    axes[0,0].scatter(*sph2carte_3D(pts_sph).T, s=1, c=xyz_to_rgb(pts_sph, coord_type='spherical'))
-    axes[0,0].set_title("Original points")
-    set_equal_aspect_3d(axes[0,0])
+    fig, axes = plt.subplots(n_rows, n_cols, subplot_kw={'projection': '3d'}, figsize=(4*n_cols, 8))
 
-    axes[1,0].scatter(*sph2carte_3D(pts_cut_sph).T, s=1, c=xyz_to_rgb(pts_cut_sph, coord_type='spherical'))
-    axes[1,0].set_title("Cut points")
-    set_equal_aspect_3d(axes[1,0])
+    # Ensure axes is always 2D array
+    axes = np.atleast_2d(axes)
 
-    axes[1,1].scatter(*sph2carte_3D(pts_unfold_sph1).T, s=1, c=xyz_to_rgb(pts_unfold_sph1, coord_type='spherical'))
-    axes[1,1].set_title("Unfolded points")
-    set_equal_aspect_3d(axes[1,1])
-        
+    # --- Row 0: Original point cloud ---
+    for jj in range(n_cols):
+        ax = axes[0, jj]
+        pts_xyz = sph2carte_3D(pts_sph)
+        ax.scatter(*pts_xyz.T, s=1, c=xyz_to_rgb(pts_sph, coord_type='spherical'))
+        if jj == 0:
+            ax.set_title("Original point cloud")
+        else:
+            ax.set_title("")  # only show title on first plot
+        set_equal_aspect_3d(ax)
 
-    axes[1,2].scatter(*sph2carte_3D(pts_unfold_cylinder).T, s=1, c=xyz_to_rgb(pts_unfold_cylinder, coord_type='spherical'))
-    axes[1,2].set_title("Cylinder points")
-    set_equal_aspect_3d(axes[1,2])
-
-    axes[1,3].scatter(*sph2carte_3D(pts_cut_and_unfold_cylinder).T, s=1, c=xyz_to_rgb(pts_cut_and_unfold_cylinder, coord_type='spherical'))
-    axes[1,3].set_title("Cut + Cylinder points")
-    set_equal_aspect_3d(axes[1,3])
-
-    for jj, mode in enumerate(['wall', 'cut+wall', 'cut+cylinder']):
+    # --- Row 1: Transformed by each method ---
+    for jj, mode in enumerate(methods):
         pts_opened_sph, _, _ = open_world(forward_sph, pts_sph, mode=mode, delta_cut=2*np.pi/3)
-        ax = axes[2, jj]
-        ax.scatter(*sph2carte_3D(pts_opened_sph).T, s=1, c=xyz_to_rgb(pts_opened_sph, coord_type='spherical'))
+        ax = axes[1, jj]
+        pts_opened_xyz = sph2carte_3D(pts_opened_sph)
+        ax.scatter(*pts_opened_xyz.T, s=1, c=xyz_to_rgb(pts_opened_sph, coord_type='spherical'))
         ax.set_title(f"Open world ({mode})")
         set_equal_aspect_3d(ax)
 
