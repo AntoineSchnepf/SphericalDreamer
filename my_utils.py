@@ -1354,10 +1354,6 @@ def unique_gradient_image(width=1024, height=1024) -> Image.Image:
     return Image.fromarray(img, mode="RGB")
 
 
-
-
-
-
 # ----- TESTS -----
 if __name__ == "__main__":
     # test erp2sph_2D and sph2erp_2D

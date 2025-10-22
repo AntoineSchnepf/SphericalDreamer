@@ -553,6 +553,7 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
 
     return pcd_naive, blended_depth
 
+
 if __name__ == "__main__":
     # ---- args ----
     debug = False
@@ -562,7 +563,7 @@ if __name__ == "__main__":
 
     # dreaming args
     num_dreams = 5
-    seeds = [119224, 119224+9, 119224+20]*num_dreams
+    seeds = [119224, 119224+9, 119224+20, 119224+33, 119224+45]
     translation_direction = my_utils.get_norm_vector(np.array([1, 0, 0], dtype=np.float32))
     sphere_radius = 1.0
     delta_walk = sphere_radius * np.pi / 2
