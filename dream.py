@@ -572,7 +572,8 @@ if __name__ == "__main__":
             dream=i,
             save_dir_=save_dir_
         )
-        pts2_carte_corrected = my_utils.GeometryTransforms.run_corrective_pipeline(
+        pts2_carte_corrected, colors2_corrected = my_utils.GeometryTransforms.run_corrective_pipeline(
+            colors=colors2,
             depth=depth2,
             sphere_radius=sphere_radius,
             height=height,
@@ -584,11 +585,12 @@ if __name__ == "__main__":
             correct_walls=False,
             remove_sky=False,
             indoor_or_outdoor=None,
+            remove_outliers=False,
             verbose=True
         )
         
         sphere2 = my_utils.Sphere(
-            None, pts2_carte_corrected, colors2, 
+            None, pts2_carte_corrected, colors2_corrected, 
             forward_carte=translation_direction,
             opening_kwargs=opening_kwargs,
         )
