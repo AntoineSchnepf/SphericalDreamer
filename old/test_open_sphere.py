@@ -1,4 +1,4 @@
-from spherical_independant_dreams import Sphere, load_sphere
+from dream import Sphere, load_sphere
 import numpy as np
 import my_utils
 

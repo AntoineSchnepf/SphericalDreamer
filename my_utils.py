@@ -15,12 +15,13 @@ from sklearn.neighbors import kneighbors_graph, NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
 from scipy.sparse import diags
 from scipy.sparse.linalg import cg, splu
+import time
 
 
 
-# ---------------------------- #
-# ----- Computer Vision ------ #
-# ---------------------------- #
+# -------------------------------------------- #
+# ------ Classic Computer Vision utils ------- #
+# -------------------------------------------- #
 
 def fill_mask(mask, flip=False):
     # mask: boolean NumPy array
@@ -544,340 +545,929 @@ def depth2world(depth, pose, sphere_radius, height, width):
 #     points_3D_world_carte = cam_sph_to_world_3D(points_3D_cam_sph, pose)
 #     return points_3D_world_carte
 
-
-
 # ---------------------------------------- #
-# ---- Warping / Splatting functions ----- #
+# ----- Panorama / Pointcloud utils  ----- #
 # ---------------------------------------- #
+def load_rgbd_pano(dream, save_dir_, override_depth_with_ones=False):
 
-def prepare_coords(coord_cam2, height, width, **additional_data):
-    """
-    Prepare coordinates for splatting:
-    - Round to nearest integer pixel
-    - Keep only those that fall inside the target frame
-    All additional data (colors, depths, etc.) are filtered accordingly.
-    coord_cam2 and additional_data must be numpy arrays of shape [N, ...].
-    """
-    assert coord_cam2 is not None
-    colors = additional_data.get('colors')
-    coord_cam1 = additional_data.get('coord_cam1')
-    depth_cam2 = additional_data.get('depth_cam2')
+    pano_rgb = Image.open(f"{save_dir_}/dream_{dream:02d}/XX_pano_rgb.png")
+    depth = np.load(f"{save_dir_}/dream_{dream:02d}/XX_depth.npy")
+    if override_depth_with_ones:
+        depth = np.ones_like(depth)  
+        print("WARNING: depth override to ones for debugging purposes")
+    colors = np.array(pano_rgb)/255.0
+    return colors, depth
 
-    # Round target coordinates to nearest integer pixel (u -> x/col, v -> y/row)
-    u = coord_cam2[:, 0]
-    v = coord_cam2[:, 1]
-    u_r = np.rint(u).astype(np.int32)
-    v_r = np.rint(v).astype(np.int32)
+class PointCloud:
+    def __init__(self, pts, colors):
+        """
+        pts: np.array of shape [..., 3]
+        colors: np.array of shape [..., 3] with values in [0-1]
+        """
+        self.pts = pts.reshape(-1, 3)
+        self.colors = colors.reshape(-1, 3)
+        assert self.pts.shape[0] == self.colors.shape[0], "Error: pts and colors must have the same number of points"
 
-    # Keep only those that fall inside the target frame
-    in_bounds = (u_r >= 0) & (u_r < width) & (v_r >= 0) & (v_r < height)
-    assert np.any(in_bounds), "No points project inside the target frame!"
+    def get_o3d_pointcloud(self):
+        import open3d as o3d
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.pts)
+        pcd.colors = o3d.utility.Vector3dVector(self.colors)
+        return pcd
 
-    # Restrict to valid points
-    out = {
-        'in_bounds': in_bounds,
-        'u_r': u_r[in_bounds],
-        'v_r': v_r[in_bounds],
-        'u_float': u[in_bounds],
-        'v_float': v[in_bounds],
-    }
-
-    # Prepare additional optional data
-    if colors is not None:
-        out['colors'] = colors[in_bounds]
-    if depth_cam2 is not None:
-        out['depth_cam2'] = depth_cam2[in_bounds].astype(np.float32)
-    if coord_cam1 is not None:
-        out['coord_cam1'] = coord_cam1[in_bounds]
-
-    return out
-
-def get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width):
-    """
-    z-buffer splatting to find winning points per pixel.
-    args:
-        - depth_cam2: np.array of shape [N,] with float values
-        - coord_cam2: np.array of shape [N, 2] with float values
-    """
-
-    # Prepare coordinates (rounding, in-bounds filtering)
-    out = prepare_coords(coord_cam2, height, width, depth_cam2=depth_cam2)
-
-    u_r = out['u_r']
-    v_r = out['v_r']
-    depth_cam2 = out['depth_cam2']
-
-    # Linearized target indices (row-major)
-    tgt_lin = (v_r.astype(np.int64) * width + u_r.astype(np.int64))
-
-    # Resolve collisions per target pixel with z-buffer: keep the *nearest* depth
-    order = np.lexsort((depth_cam2, tgt_lin))        # primary: tgt_lin, secondary: depth (ascending)
-    tgt_sorted = tgt_lin[order]
-    _, first_idx = np.unique(tgt_sorted, return_index=True)
-    winners = order[first_idx]
-
-    # Winners' data
-    return winners
-
-def splatting_and_interpolation(colors, depth_cam2, coord_cam2, height, width, interpolation_mode='original'):
-    """
-    This function takes as input: 
-        - `colors` an array of colors (N, 3) in [0-1]
-        - `depth_cam2` an array of depth values (N,) in [0-1]
-        - `coord_cam2` an array of 2D coordinates in the image frame (N, 2) in pixel coordinates
-    From this information, is returned 
-        - the warped_image (no interpolation)
-        - the warped_depth (no interpolation)
-        - the binary mask of visited pixels
-        - the interpolated_image (with interpolation)
-        - the interpolated_depth (with interpolation)
-    """
-    #TODO: better docstring
-
-    # Basic checks
-    assert colors.shape[-1] == 3
-    assert coord_cam2.shape[-1] == 2
-    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape
-
-    # Flatten to [N, ...]
-    colors   = colors.reshape((-1, 3))
-    coord_cam2 = coord_cam2.reshape((-1, 2))
-    depth_cam2 = depth_cam2.reshape((-1,))
-
-    # Prepare coordinates (rounding, in-bounds filtering)
-    out = prepare_coords(coord_cam2, height, width, colors=colors, depth_cam2=depth_cam2)
-
-    # --- I. Z-buffer Splatting to find winners ----
-    winners = get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width)
-
-    # Winners' data
-    u_win_r = out['u_r'][winners]
-    v_win_r = out['v_r'][winners]
-    depths_win = out['depth_cam2'][winners]
-    colors_win = out['colors'][winners]   
-    u_win_f = out['u_float'][winners]       
-    v_win_f = out['v_float'][winners]        
-    # ---- II. Allocate outputs -----
-    # 1. Visited mask
-    visited = np.zeros((height, width), dtype=bool)
-    visited[v_win_r, u_win_r] = True
-
-    # 2. Naive without Interpolation
-    warped_img   = np.zeros((height, width, 3), dtype=np.float32)
-    warped_depth = np.full((height, width), 0.0, dtype=np.float32)
-    warped_img[v_win_r, u_win_r]   = colors_win
-    warped_depth[v_win_r, u_win_r] = depths_win
-
-    # 3. With Interpolation
-    grid = np.stack((np.meshgrid(range(width), range(height))), axis=-1).reshape(-1, 2).astype(np.float32)
-    if interpolation_mode == 'original':
-        points_ = np.stack((u_win_f, v_win_f), axis=-1).astype(np.float32)
-    elif interpolation_mode == 'rounded':
-        points_ = np.stack((u_win_r, v_win_r), axis=-1).astype(np.float32)
-    else:
-        raise ValueError(f"Unknown interpolation mode: {interpolation_mode}")
+class SphereState:
+    def __init__(self, pts_carte, colors, pose):
+        """everything in spherical coordinates"""
+        self.pts = pts_carte
+        self.colors = colors
+        self.pose = pose
+        self.is_world_pcd_init=False
     
-    image_interp = interp_grid(
-        points_,
-        colors_win,
-        grid, 
-        method='linear', 
-        # fill_value=0
-    ).reshape(height,width,3)
+    def init_world_pcd(self):
+        assert not self.is_world_pcd_init, "World pointcloud is already initialized"
+        assert self.pose is not None, "Pose must be defined to compute world pointcloud"
 
-    depth_interp = interp_grid(
-        points_,
-        depths_win,
-        grid,
-        method='linear',
-        # fill_value=0
-    ).reshape(height,width)
+        self.world_pcd = PointCloud(
+            pts=cam_carte2world_3D(self.pts, self.pose),
+            colors=self.colors
+        )
+        self.is_world_pcd_init=True
 
+    def get_world_pcd(self):
+        "returns pointcloud in world coordinates"
 
+        if not self.is_world_pcd_init:
+            self.init_world_pcd()
 
-    return warped_img, warped_depth, image_interp, depth_interp, visited
+        return self.world_pcd
 
-def depth_aware_naive_splatting_vectorized(colors, coord_cam1, coord_cam2, depth_cam2, height, width):
+    def update_pose(self, new_pose):
+        self.pose = new_pose
+        self.is_world_pcd_init=False
+
+_default_opening_kwargs = {
+    'opening_mode': 'cut+cylinder',
+    'delta_cut': 2*np.pi/3,
+    'cut_distance_percentile': 90,
+}
+
+class Sphere:
+
+    def __init__(self, pose, pts_carte, colors, forward_sph=None, forward_carte=None, opening_kwargs=_default_opening_kwargs):
+        """
+        Can be derived in four different ways: open left, open right, open both, open none
+        Input points are expected not to be opened ye.
+        A sphere has a forward direction, which can be expressed in spherical coordinates or cartesian coordinates
+        """
+        assert (forward_sph is not None) or (forward_carte is not None), "Error: forward direction must be provided in either spherical or cartesian coordinates"
+        self.forward_sph = forward_sph if forward_sph is not None else carte2sph_3D(forward_carte)
+        self.forward_carte = forward_carte if forward_carte is not None else sph2carte_3D(forward_sph)
+        self.opening_kwargs = opening_kwargs
+        self.pose = pose
+
+        # open the Sphere in all four ways to get all states
+        t = time.time()
+        self.init_states(pts_carte, colors)
+        print(f"Sphere init took {time.time() - t:.1f}s")
+
+    @staticmethod
+    def filter_nan(pts_carte, colors):
+        mask_finite = np.isfinite(pts_carte).all(axis=-1) & np.isfinite(colors).all(axis=-1)
+        pts_carte = pts_carte[mask_finite]
+        colors = colors[mask_finite]
+        return pts_carte, colors
+    
+    def init_states(self, pts_carte, colors):
+        # filter nan
+        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+        # compute all openings
+        self.closed = self._close(self.pts_carte, self.colors)
+        self.both_opened = self._open_both(self.pts_carte, self.colors)
+        self.left_opened = self._open_left(self.pts_carte, self.colors)
+        self.right_opened = self._open_right(self.pts_carte, self.colors)
+
+    def get_state(self, open_left, open_right):
+        if open_left and open_right:
+            return self.both_opened_sphere
+        elif open_left and not open_right:
+            return self.left_opened_sphere
+        elif not open_left and open_right:
+            return self.right_opened_sphere
+        else:
+            return self.closed_sphere
+    
+    def _close(self, pts_carte, colors):
+        sphere_closed = SphereState(
+            pts_carte=pts_carte, 
+            colors=colors,
+            pose=self.pose
+        )
+        return sphere_closed
+    
+    def _open_left(self, pts_carte, colors):
+        _, open_pts_carte, mask_opening = open_world_carte(
+            forward_carte=-self.forward_carte,
+            pts_carte=pts_carte,
+            **self.opening_kwargs
+        )
+        sphere_opened_left = SphereState(
+            pts_carte=open_pts_carte[mask_opening], 
+            colors=colors[mask_opening],
+            pose=self.pose
+        )
+        return sphere_opened_left
+
+    def _open_right(self, pts_carte, colors):
+        _, open_pts_carte, mask_opening = open_world_carte(
+            forward_carte=self.forward_carte,
+            pts_carte=pts_carte,
+            **self.opening_kwargs
+        )
+        sphere_opened_right = SphereState(
+            pts_carte=open_pts_carte[mask_opening], 
+            colors=colors[mask_opening],
+            pose=self.pose
+        )
+        return sphere_opened_right
+
+    def _open_both(self, pts_carte, colors):
+        _, open_pts_carte, mask_opening1 = open_world_carte(
+            forward_carte=self.forward_carte,
+            pts_carte=pts_carte,
+            **self.opening_kwargs
+        )
+        open_pts_carte = open_pts_carte[mask_opening1]
+        colors = colors[mask_opening1]
+
+        _, open_pts_carte, mask_opening2 = open_world_carte(
+            forward_carte=-self.forward_carte,
+            pts_carte=open_pts_carte,
+            **self.opening_kwargs
+        )
+        open_pts_carte = open_pts_carte[mask_opening2]
+        colors = colors[mask_opening2]
+        sphere_opened_both = SphereState(
+            pts_carte=open_pts_carte, 
+            colors=colors,
+            pose=self.pose
+        )
+
+        return sphere_opened_both
+
+    def add_new_points(self, new_pts_carte, new_colors):
+        pts_carte = np.concatenate((self.pts_carte, new_pts_carte.reshape(-1, 3)), axis=0)
+        colors = np.concatenate((self.colors, new_colors.reshape(-1, 3)), axis=0)
+        self.init_states(pts_carte, colors)
+
+    def update_pose(self, new_pose):
+        self.pose = new_pose
+        for state in [self.closed, self.both_opened, self.left_opened, self.right_opened]:
+            state.update_pose(new_pose)
+
+def camera_translation(pose, translation):
     """
-    This functions computes a new image, at a new camera location, based on:
-        (i) a set coordinates of colored points in the new image: `coord_cam2` (float values)
-        (ii) corresponding colors: `colors`
-        (iii) corresponding depths: `depth_cam2`
-    This functions rounds the float values, to obtain proper pixel location. If there are multiple pixels for a location, 
-    the point that is the nearest to the camera is chosen. This models occlusions. 
-
-    It is a simple form of splatting, using a z-buffer. 
-
-    args:
-        img: np.array with values in [0,1]. Shape [H, W, 3] or [HW, 3].Colors of the pixels at canonical locations(
-            [[[0,0], ..., [0,W]],
-            ...
-            [H,0], ..., [H,W]]]
-        ) in the source image, i.e. the source image itself
-        coord_cam2: pixel coordinates in the new image (float values). Shape [H, W, 2] or [HW, 2].
-        depth_cam2: np.array. Depth at new camera location (float values). Shape [H, W] or [HW].
+    pose: np.array of shape [4,4]
+    translation: np.array of shape [3,] in world coordinates
     """
-    # Basic checks
-    assert colors.shape[-1] == 3
-    assert coord_cam2.shape[-1] == 2
-    assert coord_cam1.shape[-1] == 2
-    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
-
-    # Flatten to [N, ...]
-    colors   = colors.reshape((-1, 3))
-    coord_cam1 = coord_cam1.reshape((-1, 2))
-    coord_cam2 = coord_cam2.reshape((-1, 2))
-    depth_cam2 = depth_cam2.reshape((-1,))
-
-    # Prepare coordinates (rounding, in-bounds filtering)
-    out = prepare_coords(coord_cam2, height, width, colors=colors, coord_cam1=coord_cam1, depth_cam2=depth_cam2)
-    # z-buffer splatting to find winners
-    winners = get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width)
-
-    # Winners' data
-    u_win_r = out['u_r'][winners]
-    v_win_r = out['v_r'][winners]
-    depths_win = out['depth_cam2'][winners]
-    colors_win = out['colors'][winners]
-    coord1_win = out['coord_cam1'][winners]      # (a, b) source coordinates
-    u_win_f = out['u_float'][winners]        # unrounded u for flow key
-    v_win_f = out['v_float'][winners]        # unrounded v for flow key
-
-    # Allocate outputs
-    warped_img   = np.zeros((height, width, 3), dtype=np.float32)
-    warped_depth = np.full((height, width), np.inf, dtype=np.float32)
-    visited      = np.zeros((height, width), dtype=bool)
-
-    # Scatter winners into outputs
-    warped_img[v_win_r, u_win_r]   = colors_win
-    warped_depth[v_win_r, u_win_r] = depths_win
-    visited[v_win_r, u_win_r]      = True
-
-    # Flow mapping: map exact (float u, float v) -> (a, b) from coord_cam1
-    # Convert to native Python floats for dict keys/values
-    flow = {(float(uf), float(vf)): (ab[0], ab[1])
-            for uf, vf, ab in zip(u_win_f, v_win_f, coord1_win)}
-
-    return warped_img, warped_depth, flow, visited
-
-def depth_aware_naive_splatting(colors, coord_cam1, coord_cam2, depth_cam2, height, width):
-    """
-    This functions computes a new image, at a new camera location, based on:
-        (i) a set coordinates of colored points in the new image: `coord_cam2` (float values)
-        (ii) corresponding colors: `colors`
-        (iii) corresponding depths: `depth_cam2`
-    This functions rounds the float values, to obtain proper pixel location. If there are multiple pixels for a location, 
-    the point that is the nearest to the camera is chosen. This models occlusions. 
-
-    It is a simple form of splatting, using a z-buffer. 
-
-    args:
-        img: np.array with values in [0,1]. Shape [H, W, 3] or [HW, 3].Colors of the pixels at canonical locations(
-            [[[0,0], ..., [0,W]],
-            ...
-            [H,0], ..., [H,W]]]
-        ) in the source image, i.e. the source image itself
-        coord_cam2: pixel coordinates in the new image (float values). Shape [H, W, 2] or [HW, 2].
-        depth_cam2: np.array. Depth at new camera location (float values). Shape [H, W] or [HW].
-    """
-    assert colors.shape[-1] == 3
-    assert coord_cam2.shape[-1] == 2
-    assert colors.shape[:-1] == coord_cam2.shape[:-1] == depth_cam2.shape == coord_cam1.shape[:-1]
-
-    colors = colors.reshape((-1, 3))
-    coord_cam1 = coord_cam1.reshape((-1, 2))
-    coord_cam2 = coord_cam2.reshape((-1, 2))
-    depth_cam2 = depth_cam2.reshape((-1,))
-
-    warped_img = np.zeros(shape=(height, width, 3), dtype=np.float32)
-    warped_depth = np.full(shape=(height, width) , fill_value=np.inf, dtype=np.float32)
-    visited_pixels = np.zeros(shape=(height, width), dtype=bool)  # keep track of visited pixels
-    # more_than_once_visited = np.zero(shape=(height, width), dtype=bool)  # keep track of pixels visited more than once
-    # visited_count = 0
+    pose2 = pose.copy()
+    pose2[:3, 3] += translation
+    return pose2
 
 
-    flow_mapping = {}
-    # Iterate over all the 3D points 
-    for k in range(len(coord_cam2)):
-        (a,b) = coord_cam1[k] # (a, b) represent the coordinates of the current point in the source image
-        (u,v) = coord_cam2[k] # (u, v) represent the coordinates of the current point in the target image
+# ---------------------------------------- #
+# ------- Depth Correction utils  -------- #
+# ---------------------------------------- #
+class Regression1D:
 
-        u_ = int(round(u))  
-        v_ = int(round(v))
+    @staticmethod
+    def fit_nw_grid_interpolator_1d(X, Y, bandwidth, grid_size=1024, margin=3.0):
+        """
+        Fit-time:
+        - builds a 1D grid that extends beyond data by `margin * bandwidth`,
+        - evaluates Nadaraya–Watson (Gaussian) on that grid,
+        - returns an inference-only f(x) that linearly interpolates on the grid.
 
-        color = colors[k]
-        depth2 = depth_cam2[k]
+        Parameters
+        ----------
+        X : array-like, shape (n,)
+            Training inputs.
+        Y : array-like, shape (n,)
+            Training targets.
+        bandwidth : float
+            Gaussian kernel width (σ). Larger => smoother.
+        grid_size : int, default 1024
+            Number of grid points to precompute.
+        margin : float, default 3.0
+            Extra range (in units of σ) added on both sides of [min(X), max(X)]
+            to stabilize edge behavior and improve clamped extrapolation.
+
+        Returns
+        -------
+        f : callable
+            Inference-only function. Accepts batched x with shape [...] and returns shape [...].
+            Interpolates within the grid; clamps to edge values outside the grid.
+        """
+        X = np.asarray(X, dtype=float).ravel()
+        Y = np.asarray(Y, dtype=float).ravel()
+        assert X.ndim == 1 and Y.ndim == 1 and X.size == Y.size, "X and Y must be 1D and same length."
+        assert bandwidth > 0.0, "bandwidth must be positive."
+
+        # Build grid with padding to mitigate boundary artifacts
+        x_min = X.min() - margin * bandwidth
+        x_max = X.max() + margin * bandwidth
+        x_grid = np.linspace(x_min, x_max, int(grid_size))
+
+        # Evaluate NW smoother on the grid (vectorized, O(grid_size * n))
+        D = (x_grid[:, None] - X[None, :]) / bandwidth                  # shape (G, n)
+        W = np.exp(-0.5 * D**2)                                         # Gaussian kernels
+        W_sum = W.sum(axis=1) + 1e-12                                   # avoid divide-by-zero
+        y_grid = (W @ Y) / W_sum                                        # shape (G,)
+
+        # Inference-only interpolator: piecewise-linear + clamped extrapolation
+        def f(x):
+            x = np.asarray(x, dtype=float)
+            x_flat = x.ravel()
+            # np.interp clamps to left/right values if outside the grid
+            y_flat = np.interp(x_flat, x_grid, y_grid, left=y_grid[0], right=y_grid[-1])
+            return y_flat.reshape(x.shape)
+
+        return f
+
+    @staticmethod
+    def fit_local_min_knots_interpolator_1d(
+        X, Y, bandwidth, *, handle_empty="skip", tie_break="center"
+    ):
         
-        if 0 <= u_ < width and 0 <= v_ < height:
+        """
+        One-shot: build (X_min, Y_min) knots per bin, and return an
+        inference-only monotone interpolator.
+        """
+                
+        X = np.asarray(X, dtype=float).ravel()
+        Y = np.asarray(Y, dtype=float).ravel()
+        if X.size != Y.size:
+            raise ValueError("X and Y must have the same length.")
+        if not np.all(np.isfinite(X)) or not np.all(np.isfinite(Y)):
+            raise ValueError("X and Y must be finite.")
+        if bandwidth <= 0:
+            raise ValueError("bandwidth must be > 0.")
 
-            # /!\ Reference frame for an image inverts horizontal and vertical axis
-            if warped_depth[v_, u_] > depth2 : # If this points is closer than previous
-                warped_depth[v_, u_] = depth2 
-                warped_img[v_, u_] = color 
-                visited_pixels[v_, u_] = True
-                flow_mapping[(u_, v_)] = ((a, b), (u, v))
+        x_min, x_max = X.min(), X.max()
+        n_bins = max(1, int(np.ceil((x_max - x_min) / bandwidth)))
+        bin_edges = x_min + np.arange(n_bins + 1) * bandwidth
+        if bin_edges[-1] < x_max:
+            bin_edges[-1] = x_max
 
-    flow = {}
-    for ((a, b), (u, v)) in flow_mapping.values():
-        flow[(float(u), float(v))] = (a, b)
+        bin_idx = np.digitize(X, bin_edges, right=False) - 1
+        bin_idx = np.clip(bin_idx, 0, n_bins - 1)
 
-    return warped_img, warped_depth, flow, visited_pixels
+        X_k = np.full(n_bins, np.nan)
+        Y_k = np.full(n_bins, np.nan)
 
-def interpolate_with_flow(colors, depths, flow, mode='original'):
-    """
-    args:
-        colors: np.array with values in [0,1]
-        depths: np.array with float values 
-        flow: dict with keys as pixel coordinates in source image and values as pixels coordinates in target (warped) image.
-        It looks like {(u_, v_) : (i, j)}
+        for b in range(n_bins):
+            mask = (bin_idx == b)
+            if not np.any(mask):
+                continue
+            Xb = X[mask]
+            Yb = Y[mask]
+            y_min = np.min(Yb)
+            tie_mask = (Yb == y_min)
+            if tie_break == "first":
+                i = np.argmax(tie_mask)
+            elif tie_break == "last":
+                i = len(Yb) - 1 - np.argmax(tie_mask[::-1])
+            else:  # "center"
+                center = 0.5 * (bin_edges[b] + bin_edges[b + 1])
+                idxs = np.flatnonzero(tie_mask)
+                i = idxs[np.argmin(np.abs(Xb[idxs] - center))]
+            X_k[b] = Xb[i]
+            Y_k[b] = y_min
 
-    """
-    width = colors.shape[1]
-    height = colors.shape[0]
+        if handle_empty == "nearest":
+            # forward fill
+            for i in range(1, n_bins):
+                if not np.isfinite(Y_k[i]):
+                    X_k[i] = X_k[i - 1]
+                    Y_k[i] = Y_k[i - 1]
+            # backward fill
+            for i in range(n_bins - 2, -1, -1):
+                if not np.isfinite(Y_k[i]):
+                    X_k[i] = X_k[i + 1]
+                    Y_k[i] = Y_k[i + 1]
 
-    grid = np.stack((np.meshgrid(range(width), range(height))), axis=-1).reshape(-1, 2).astype(np.float32)
-    rgb_values = []
-    depth_values = []
-    points = []
-    points_rounded = []
-    for (u_, v_), (a,b) in flow.items():
-        rgb_values.append(
-            colors[b,a]
+        finite = np.isfinite(X_k) & np.isfinite(Y_k)
+        X_k = X_k[finite]
+        Y_k = Y_k[finite]
+        if X_k.size == 0:
+            def f_nan(x):
+                x = np.asarray(x, dtype=float)
+                return np.full_like(x, np.nan)
+            return f_nan, X_k, Y_k
+
+        order = np.argsort(X_k)
+        X_k = X_k[order]
+        Y_k = Y_k[order]
+
+        uniq_x, inv = np.unique(X_k, return_inverse=True)
+        if uniq_x.size != X_k.size:
+            y_min_by_x = np.full_like(uniq_x, np.inf, dtype=float)
+            np.minimum.at(y_min_by_x, inv, Y_k)
+            X_k, Y_k = uniq_x, y_min_by_x
+
+        def f(x):
+            x = np.asarray(x, dtype=float)
+            x_flat = x.ravel()
+            y_flat = np.interp(x_flat, X_k, Y_k, left=Y_k[0], right=Y_k[-1])
+            return y_flat.reshape(x.shape)
+
+        return f, X_k, Y_k
+
+    @staticmethod
+    def _isotonic_l2_pav(y, w=None):
+        """
+        Pool-Adjacent-Violators for nondecreasing isotonic regression (L2).
+        Returns the closest (in weighted L2) nondecreasing vector to y.
+        """
+        y = np.asarray(y, dtype=float)
+        n = y.size
+        if n == 0:
+            return y
+        if w is None:
+            w = np.ones(n, dtype=float)
+        else:
+            w = np.asarray(w, dtype=float)
+        # Initialize blocks
+        v = y.copy()
+        wv = w.copy()
+        # Stack of block end indices
+        end = [0]
+        for i in range(n):
+            v[i] = y[i]
+            wv[i] = w[i]
+            end.append(i + 1)
+            # Merge while violating monotonicity
+            while len(end) >= 3:
+                i2 = end[-1]      # end of last block
+                i1 = end[-2]      # start of last block
+                i0 = end[-3]      # start of penultimate block
+                if v[i1 - 1] <= v[i2 - 1]:
+                    break
+                # pool blocks [i0:i1] and [i1:i2]
+                tot_w = wv[i1 - 1] + wv[i2 - 1]
+                avg = (wv[i1 - 1] * v[i1 - 1] + wv[i2 - 1] * v[i2 - 1]) / tot_w
+                v[i1 - 1] = avg
+                wv[i1 - 1] = tot_w
+                # pop last block
+                end.pop()
+                end[-1] = i2  # extend previous block to new end
+        # Expand block means
+        y_iso = np.empty_like(y)
+        start = 0
+        for e in end[1:]:
+            y_iso[start:e] = v[e - 1]
+            start = e
+        return y_iso
+
+    @staticmethod
+    def _make_monotone_increasing_from_knots(
+        X_knots, Y_knots, *, weights=None, lower=None, upper=None,
+        strict=False, eps=1e-12
+    ):
+        """
+        Enforce nondecreasing Y over X_knots via isotonic regression, then
+        return an inference-only linear interpolator over (X_knots, Y_iso).
+
+        - 'sticks' to Y_knots wherever they already satisfy monotonicity.
+        - optional bounds 'lower'/'upper' clamp the final curve.
+        - if strict=True, nudges flat segments by tiny eps to be strictly increasing.
+
+        Returns f_mono, (X_knots_sorted, Y_iso)
+        """
+        Xk = np.asarray(X_knots, dtype=float)
+        Yk = np.asarray(Y_knots, dtype=float)
+        mask = np.isfinite(Xk) & np.isfinite(Yk)
+        Xk, Yk = Xk[mask], Yk[mask]
+        if Xk.size == 0:
+            def f_nan(x):
+                x = np.asarray(x, dtype=float)
+                return np.full_like(x, np.nan)
+            return f_nan, (Xk, Yk)
+
+        order = np.argsort(Xk)
+        Xk = Xk[order]
+        Yk = Yk[order]
+        if weights is not None:
+            w = np.asarray(weights, dtype=float)[mask][order]
+        else:
+            w = None
+
+        Y_iso = Regression1D._isotonic_l2_pav(Yk, w=w)
+
+        if lower is not None:
+            Y_iso = np.maximum(Y_iso, lower)
+        if upper is not None:
+            Y_iso = np.minimum(Y_iso, upper)
+
+        if strict:
+            # Make strictly increasing by adding tiny offsets to flat runs
+            # while staying within bounds if provided.
+            diffs = np.diff(Y_iso)
+            flat_idx = np.where(diffs <= 0)[0]
+            k = 0
+            for i in flat_idx:
+                k += 1
+                Y_iso[i + 1] = max(Y_iso[i + 1], Y_iso[i] + eps)
+            # optional: re-clip
+            if lower is not None:
+                Y_iso = np.maximum(Y_iso, lower)
+            if upper is not None:
+                Y_iso = np.minimum(Y_iso, upper)
+
+        def f(x):
+            x = np.asarray(x, dtype=float)
+            x_flat = x.ravel()
+            y_flat = np.interp(x_flat, Xk, Y_iso, left=Y_iso[0], right=Y_iso[-1])
+            return y_flat.reshape(x.shape)
+
+        return f, (Xk, Y_iso)
+
+    @staticmethod
+    def fit_local_min_knots_monotone_interpolator_1d(
+        X, Y, bandwidth, *, handle_empty="skip", tie_break="center",
+        lower=None, upper=None, strict=False, weights=None
+    ):
+        """
+        One-shot: build (X_min, Y_min) knots per bin, then enforce
+        nondecreasing Y via isotonic regression, and return an
+        inference-only monotone interpolator.
+        """
+        _, Xk, Yk = Regression1D.fit_local_min_knots_interpolator_1d(
+            X, Y, bandwidth, handle_empty=handle_empty, tie_break=tie_break
         )
-        depth_values.append(
-            depths[b,a]
+        f_mono, (Xk_sorted, Y_iso) = Regression1D._make_monotone_increasing_from_knots(
+            Xk, Yk, weights=weights, lower=lower, upper=upper, strict=strict
         )
-        points.append((u_, v_))
-        points_rounded.append((round(u_), round(v_)))
+        
+        return f_mono
 
-    points = np.array(points)
-    rgb_values = np.array(rgb_values)
-    points_rounded = np.array(points_rounded)
+class GeometryTransforms:
 
-    if mode == 'original':
-        points_ = points
-    elif mode == 'rounded':
-        points_ = points_rounded
-    else:
-        raise ValueError("Mode must be 'rounded' or 'original'.")
+    @staticmethod
+    def depth_transform(
+        D_raw: np.ndarray,
+        n: float = 0.5,      # near (meters)
+        f: float = 200.0,    # far  (meters)
+        method: str = "inv",  # "inv", "exp", "gamma", 'threshold'
+        gamma: float = 0.6,  # used if method=="gamma" (gamma<1 expands far)
+        k: float = 3.0,       # used if method=="exp"   (larger k → more far expansion)
+        plot: bool = False
+    ) -> np.ndarray:
+        """
+        Map depth D in [0,1] (near≈0, far≈1) to metric range Z in [n,f], monotonically increasing.
+
+        Methods:
+        - "linear":   Z = n + D*(f-n)  (identity, no correction)
+        - "inv":  assumes D is ~linear in 1/Z but with near→0, far→1.
+                        Z = 1 / ( 1/n - D*(1/n - 1/f) )
+                        (Excellent default to remove far stacking.)
+        - "exp":       convex exponential easing toward f:
+                        s = (exp(k*D)-1)/(exp(k)-1); Z = n + s*(f-n)
+                        (k>0; increases separation at large D.)
+        - "gamma":     gamma pre-warp then linear:
+                        Dg = D**gamma (gamma<1 expands far); Z = n + Dg*(f-n)
+        """
+        D = np.asarray(D_raw, dtype=np.float32)
+        D = np.clip(D, 0.0, 1.0)
+        
+        if plot: 
+            plot_d = np.linspace(0, 1, 500)
+
+        if method == "linear":
+            Z = D * (f - n) + n
+            if plot:
+                Z_plot = plot_d * (f - n) + n
+
+        elif method =='threshold':
+            def corr(D):
+                D[D>0.9] = f
+                return D
+            Z = corr(D)
+            if plot:
+                Z_plot = corr(plot_d)
+
+        elif method == "inv":
+            n = max(n, 1e-3)  # avoid div-by-zero
+            def corr(D):
+                denom = (1.0 / n) - D * (1.0 / n - 1.0 / f)
+                Z = 1.0 / np.clip(denom, 1e-9, None)
+                return Z
+            Z = corr(D)
+            if plot:
+                Z_plot = corr(plot_d)
+
+        elif method == "exp":
+            def corr(D):
+                s = (np.exp(k * D) - 1.0) / (np.exp(k) - 1.0 + 1e-9)
+                Z = n + s * (f - n)
+                return Z
+            Z = corr(D)
+            if plot:
+                Z_plot = corr(plot_d)
+
+        elif method == "gamma":
+            def corr(D):
+                Dg = D ** gamma   # gamma<1 expands high-D region
+                Z = n + Dg * (f - n)
+                return Z
+            Z = corr(D)
+            if plot:
+                Z_plot = corr(plot_d)
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        if plot:
+            plt.figure()
+            plt.plot(plot_d, Z_plot, label='corrected')
+            plt.plot(plot_d, plot_d * (f - n) + n, '--', label='linear')
+            plt.legend()
+            plt.xlabel("Input D (0=near, 1=far)")
+            plt.ylabel("Output Z (meters)")
+            plt.title(f"Depth Linearization: method={method}, n={n}, f={f}")
+            plt.grid()
+            plt.show()
+        # Optional: set invalid/zero inputs to NaN
+        Z[~np.isfinite(D)] = np.nan
+        return Z
+
+    @staticmethod
+    def _l2_errors(x, y):
+        "norm over last axis"
+        return np.sqrt((x - y)**2)
+
+    @staticmethod
+    def _l1_errors(x, y):
+        "norm over last axis"
+        return np.abs(x - y)
+
+    @staticmethod
+    def correct_floor_v1(P, depth_map_eqr, error_type='l1', plot=False):
+        """
+        Correct points using trigonometry and an heuristic to make the floor flat
+        The next version is better. Keeping this one just for reference.
+        """
+        thetas = get_canonical_sph_pixels(height, width)[..., 0]
+        avg_depth_vertical = np.nanmean(depth_map_eqr, axis=1)  # [H, ]
+        r_horizon_theta_range=(
+            np.deg2rad(-10), np.deg2rad(-1) 
+        )
+        r_horizon_band_mask = (thetas[:,0] >= r_horizon_theta_range[0]) & (thetas[:,0] <= r_horizon_theta_range[1])
+        r_horizon = np.nanmean(avg_depth_vertical[r_horizon_band_mask])  # scalar
+
+        if error_type=='l2':
+            strength = GeometryTransforms._l2_errors(depth_map_eqr, r_horizon)
+        elif error_type=='l1':
+            strength = GeometryTransforms._l1_errors(depth_map_eqr, r_horizon)
+        else:
+            raise ValueError(f"Unknown error type: {error_type}. Choose from 'l1' or 'l2'.")
+        
+        strength = (strength - np.min(strength)) / (np.max(strength) - np.min(strength) + 1e-8)
+        strength[thetas >= 0] = 0.0
+
+        correction_raw =  (avg_depth_vertical[:, None] * np.cos(thetas + np.pi/2))[..., None] * np.array([0, 0, 1])
+        correction = strength[..., None] * correction_raw
+        corrected_pts = P + correction
+
+        if plot:
+            fig, axes = plt.subplots(3,2, figsize=(8,16))
+
+            axes[0,0].set_title("Depth")
+            axes[0,0].imshow(depth_map_eqr)
+            fig.colorbar(axes[0,0].imshow(depth_map_eqr), ax=axes[0,0])
+
+            axes[0,1].set_title("Depth Correction")
+            axes[0,1].imshow(correction[..., 2])
+            fig.colorbar(axes[0,1].imshow(correction[..., 2]), ax=axes[0,1])
+            
+            axes[1,0].set_title("Correction Raw")
+            axes[1,0].imshow(correction_raw)
+            fig.colorbar(axes[1,0].imshow(correction_raw[..., 2]), ax=axes[1,0])
+
+
+            axes[1,1].set_title("Correction Strength")
+            axes[1,1].imshow(strength)
+            fig.colorbar(axes[1,1].imshow(strength), ax=axes[1,1])
+
+            axes[2,0].set_title("Depth and Correction Profile")
+            correction_profile = np.nanmean(correction[..., 2], axis=1)
+            axes[2,0].plot(thetas[:,0], correction_profile, label="Average depth correction")
+            theta_band = np.nanmean(thetas, axis=1)
+            avg_depth_vertical = np.nanmean(depth_map_eqr, axis=1)
+            axes[2,0].plot(theta_band, avg_depth_vertical, label="average depth (before)")
+            axes[2,0].legend()
+            axes[2,0].set_xlabel("Elevation (radians)")
+            axes[2,0].set_ylabel("Average Depth")
+
+            axes[2,1].set_title("Z value Profiles before/after correction")
+            z_before = P[..., 2].mean(axis=1)
+            axes[2,1].plot(theta_band, z_before, label="Before correction")
+            axes[2,1].set_xlabel("Elevation (radians)")
+            axes[2,1].set_ylabel("Average Z value")
+
+            z_after = corrected_pts[..., 2].mean(axis=1)
+            axes[2,1].plot(theta_band, z_after, label="After correction")
+            axes[2,1].legend()
+            plt.tight_layout()
+            plt.show()
+
+            # show z axis 
+            fig, axes = plt.subplots(2,1)
+            fig.suptitle("Z values before/after correction")
+            axes[0].set_title("Before Correction")
+            im0 = axes[0].imshow(P[..., 2], vmin=-1, vmax=1)
+            fig.colorbar(im0, ax=axes[0])
+            axes[1].set_title("After Correction")
+            im1 = axes[1].imshow(corrected_pts[..., 2], vmin=-1, vmax=1)
+            fig.colorbar(im1, ax=axes[1])
+            plt.tight_layout()
+            plt.show()
+
+
+        return corrected_pts, correction, correction_raw, strength
+
+    @staticmethod
+    def correct_floor(P, height, width, plot=True):
+        """
+        Corrects a 3D point cloud so that the detected floor becomes flat.
+
+        This function identifies and models the lowest (floor) surface of a 
+        point cloud, assuming the floor corresponds to the lower envelope 
+        of the (Z, sqrt(X² + Y²)) profile below the horizon. It fits a 
+        non-decreasing local-minimum interpolator to estimate the floor height 
+        as a function of radial distance from the origin, and then vertically 
+        adjusts all points so that this estimated floor becomes flat.
+
+        Parameters
+        ----------
+        P : ndarray of shape (..., 3)
+            Input 3D point cloud. Each row or voxel corresponds to (X, Y, Z)
+            coordinates in world or sensor space.
+        plot : bool, optional, default=True
+            If True, plots the original (C, Z) data below the horizon and the 
+            fitted floor profile for visual inspection.
+
+        Returns
+        -------
+        P_corrected : ndarray of shape (..., 3)
+            The point cloud after applying the vertical correction that flattens 
+            the floor. The Z-axis is adjusted such that the estimated floor 
+            becomes level at the mean horizon height.
+        correction_raw : ndarray of shape (..., 3)
+            The vertical displacement applied to each point (ΔX, ΔY, ΔZ). 
+            Only the Z component is non-zero.
+
+        Notes
+        -----
+        The correction is derived as follows:
+
+        1. Convert the 3D points (X, Y, Z) to polar coordinates 
+        `C = sqrt(X² + Y²)` and select only the region below the horizon.
+        2. Fit a smooth, non-decreasing local-minimum interpolator 
+        `Z_floor(C)` to the lowest observed points in each radial bin.
+        This ensures that the estimated floor height is monotonic with 
+        respect to distance and not affected by local noise or clutter.
+        3. Estimate the mean horizon height `Z_horizon` using points near 
+        the horizon band.
+        4. Compute the per-point correction along Z as 
+        `ΔZ = Z_horizon - Z_floor(C)`, and apply it to flatten the floor.
+
+        The result is a geometrically corrected point cloud where the 
+        ground plane appears level, useful for visualization, mapping, 
+        or downstream processing.
+
+        See Also
+        --------
+        Regression1D.fit_local_min_knots_monotone_interpolator_1d : 
+            Used internally to fit the monotone local-minimum interpolator.
+        get_canonical_sph_pixels : 
+            Provides the spherical pixel mapping used to select points 
+            below the horizon.
+        """
+        sph_canon = get_canonical_sph_pixels(height, width)
+        phi_range = (
+            np.deg2rad(0), np.deg2rad(360)
+        )
+        below_horizon_mask_and_phi_in_range = (sph_canon[..., 0] < 0) & (sph_canon[..., 1] >= phi_range[0]) & (sph_canon[..., 1] <= phi_range[1])
+        X_bh, Y_bh, Z_bh = P[below_horizon_mask_and_phi_in_range].T
+        c_bh = np.sqrt(X_bh**2 + Y_bh**2)
+
+        bandwidth = 0.05 * (np.max(c_bh) - np.min(c_bh)) 
+        t0 = time.time()
+        f_approx = Regression1D.fit_local_min_knots_monotone_interpolator_1d(c_bh, Z_bh, bandwidth=bandwidth)
+        print("Regression for depth correction took:", time.time() - t0)
+        
+        # compute correction
+        thetas = sph_canon[..., 0]
+        horizon_theta_range=(
+            np.deg2rad(-10), np.deg2rad(-1) 
+        )
+        horizon_band_mask = (thetas[:,0] >= horizon_theta_range[0]) & (thetas[:,0] <= horizon_theta_range[1])
+        les_z_in_band = P[horizon_band_mask, ..., 2]
+        z_horizon = np.nanmean(les_z_in_band)
+
+        correction_raw = np.zeros_like(P)
+        c_input = np.sqrt(P[...,0]**2 + P[...,1]**2)
+        correction_raw = z_horizon - f_approx(c_input)
+        correction_raw = correction_raw[..., None] * np.array([0, 0, 1])
+        P_corrected = P + correction_raw
+
+        if plot:
+            plt.figure()
+            plt.title("Z values below horizon")
+            plt.scatter(c_bh, Z_bh, s=1, label='Data Points')
+            les_c = np.linspace(np.min(c_bh), np.max(c_bh), 100)
+
+            les_z_approx = f_approx(les_c)
+            plt.plot(les_c, les_z_approx, color='r', label='Kernel Regression Fit')
+            plt.xlabel("C = sqrt(X^2 + Y^2)")
+            plt.ylabel("Z values")
+            plt.legend()
+            plt.show()
+
+            plt.figure()
+            plt.imshow(correction_raw[..., 2], cmap='jet')
+            plt.title("Raw Depth Correction (new method)")
+            plt.colorbar()
+            plt.show()
+        
+        return P_corrected
+
+    @staticmethod
+    def get_sky_mask(
+            depth_map,         
+            height,
+            width,
+            thetas_range_for_sky_detection = (np.deg2rad(80), np.deg2rad(90)),
+            eps = 0.5
+        ):
+
+        thetas = get_canonical_sph_pixels(height, width)[..., 0]
+        sky_theta_mask = (thetas >= thetas_range_for_sky_detection[0]) & (thetas <= thetas_range_for_sky_detection[1])
+        depth_sky_values = depth_map[sky_theta_mask]
+        threshold = np.nanmean(depth_sky_values) - eps * np.nanstd(depth_sky_values)
+        sky_mask = depth_map >= threshold
+        return sky_mask
+
+    @staticmethod
+    def _smoothstep(a, b, x):
+        """Cubic smoothstep from 0→1 on [a,b]."""
+        t = np.clip((x - a) / (b - a + 1e-12), 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    @staticmethod
+    def correct_walls(
+            pts_sph,
+            theta_range,
+            edge=np.deg2rad(8.0),
+            sky_mask= None    
+        ):
+        """
+        Smoothly map points from sphere to cylinder only within an elevation band,
+        with soft transitions near the edges.
+
+        Conventions:
+        - phi: azimuth in [0, 2π)
+        - theta  : elevation in [-π/2, π/2] (0 at equator)
+        - r    : radius of sphere/cylinder
+        - phi_range: (phi_min, phi_max) where mapping is 'active'
+        - edge : half-width (radians) of the soft transition at each band edge
+        - sky_mask: optional boolean mask where sky points are untouched
+        Returns:
+        x_out, y_out, z_out : arrays of mapped Cartesian points
+        w                   : blend weight in [0,1] (0=sphere, 1=cylinder)
+        """
+        theta_min, theta_max = theta_range
+
+        theta, phi, r = pts_sph[..., 0], pts_sph[..., 1], pts_sph[..., 2]
+
+        # Sphere coords (elevation convention)
+        x_s = r * np.cos(theta) * np.cos(phi)
+        y_s = r * np.cos(theta) * np.sin(phi)
+        z_s = r * np.sin(theta)
+
+        # Cylinder coords (same z)
+        x_c = r * np.cos(phi)
+        y_c = r * np.sin(phi)
+        z_c = z_s  # unchanged
+
+        # Build a smooth "band" weight:
+        #  - ramp up across lower edge:  smoothstep(theta_min - edge, theta_min + edge, theta)
+        #  - ramp down across upper edge: 1 - smoothstep(theta_max - edge, theta_max + edge, theta)
+        w_up   = GeometryTransforms._smoothstep(theta_min - edge, theta_min + edge, theta)
+        w_down = 1.0 - GeometryTransforms._smoothstep(theta_max - edge, theta_max + edge, theta)
+        w = np.clip(w_up * w_down, 0.0, 1.0)
+
+        # Blend between sphere (0) and cylinder (1)
+        x_out = (1.0 - w) * x_s + w * x_c
+        y_out = (1.0 - w) * y_s + w * y_c
+        z_out = z_s  # identical in both, so blending unnecessary; kept for clarity
+
+        # Optionally preserve sky points from modification
+        if sky_mask is not None:
+            x_out[sky_mask] = x_s[sky_mask]
+            y_out[sky_mask] = y_s[sky_mask]
+            z_out[sky_mask] = z_s[sky_mask]
+
+        pts_corrected_carte = np.stack((x_out, y_out, z_out), axis=-1)
+        return pts_corrected_carte
     
-    image_interp = interp_grid(
-        points_,
-        rgb_values,
-        grid, 
-        method='linear', 
-        # fill_value=0
-    ).reshape(height,width,3)
+    @staticmethod
+    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8):
+        import open3d as o3d
+        pcd = PointCloud(pts, colors).get_o3d_pointcloud()
+        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+        inlier_pts = np.asarray(cl.points)
+        inlier_colors = np.asarray(cl.colors)
+        return inlier_pts, inlier_colors
 
-    depth_interp = interp_grid(
-        points_,
-        depth_values,
-        grid,
-        method='linear',
-        # fill_value=0
-    ).reshape(height,width)
+    @staticmethod
+    def run_corrective_pipeline(colors, depth, sphere_radius, height, width, correct_depth, near, far, correct_floor, correct_walls, remove_sky, indoor_or_outdoor, remove_outliers, verbose=False):
+        #TODO:
+        # - docstring
 
-    return image_interp, depth_interp
+        assert not np.any(np.isnan(depth)), "Depth contains NaNs!"
+        assert indoor_or_outdoor in ['indoor', 'outdoor', None], "indoor_or_outdoor must be either 'indoor' or 'outdoor'"
+
+        # 1. Get Metric Depth
+        if correct_depth:
+            depth_corrected = GeometryTransforms.depth_transform(
+                depth, 
+                method="inv", 
+                n=near, 
+                f=far, 
+                gamma=5,
+                plot=True
+            )
+            if verbose:
+                print("a. Metric Depth Obtained.")
+        else:
+            depth_corrected = depth
+            
+        # 2. Project to Camera Space in Cartesian Coordinates
+        pts_cam_cartesian = depth2cam_carte(
+            depth=depth_corrected,
+            sphere_radius=sphere_radius,
+            height=height,
+            width=width,
+        ) # [H, W, 3]
+
+        # 3. Correct Floor
+        if correct_floor:
+            pts_cam_cartesian = GeometryTransforms.correct_floor(
+                pts_cam_cartesian,
+                plot=True
+            )
+            if verbose:
+                print("b. Floor Corrected.")
+
+        # 4. Correct Walls
+        if correct_walls:
+            if indoor_or_outdoor == 'outdoor':
+                sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
+            else:
+                sky_mask = None
+                
+            pts_cam_cartesian = GeometryTransforms.correct_walls(
+                pts_sph=carte2sph_3D(pts_cam_cartesian),
+                theta_range=(np.deg2rad(0), np.deg2rad(70)),
+                edge=np.deg2rad(15),
+                sky_mask=sky_mask
+            )
+            if verbose:
+                print("c. Walls Corrected.")
+
+        #5. remove sky points
+        if remove_sky:
+            assert indoor_or_outdoor == 'outdoor', "Sky removal can only be done for outdoor scenes."
+            sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
+            pts_cam_cartesian[sky_mask] = np.array([np.nan, np.nan, np.nan])
+            #TODO: plot a figure showing the sky mask as an overlay over the image.
+
+            if verbose:
+                print("d. (Optional) Sky Removed.")
+
+        # 6. Remove statistical outliers
+        if remove_outliers: 
+            pts_cam_cartesian, colors = GeometryTransforms.remove_statistical_outliers(
+                pts=pts_cam_cartesian,
+                colors=colors,
+                nb_neighbors=20,
+                std_ratio=1.8
+            )
+            if verbose:
+                print("e. (Optional) Outliers Removed.")
+
+        return pts_cam_cartesian, colors
 
 
 # ----------------------------- #
@@ -942,9 +1532,8 @@ def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
 
 
 
-
 # --------------------------------------------#
-# ---- World Opening transformations ----- #
+# ----   World Opening transformations -----  #
 # --------------------------------------------#
 
 def get_sphere_tangent(phi0, sph_points):
@@ -1303,31 +1892,68 @@ def compute_cut_distance_based_on_percentile(pts_sph=None, pts_carte=None, forwa
     cut_distance = np.percentile(proj, percentile)
     return cut_distance
 
-def open_world_sph(forward_sph, pts_sph, mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
-    assert mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
-    if mode == 'wall':
+def open_world_sph(forward_sph, pts_sph, opening_mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
+    assert opening_mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
+    if opening_mode == 'wall':
         pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
         mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
-    elif mode == 'cut+wall':
+    elif opening_mode == 'cut+wall':
         pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
         _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif mode == 'cut+cylinder':
+    elif opening_mode == 'cut+cylinder':
         pts_opened = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
         _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif mode == 'remove_within_cone':
+    elif opening_mode == 'remove_within_cone':
         pts_opened = pts_sph
         _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif mode == 'straight_cut':
+    elif opening_mode == 'straight_cut':
         if cut_distance is None:
             cut_distance = compute_cut_distance_based_on_percentile(
                 pts_sph, forward_sph, percentile=cut_distance_percentile
             )
         pts_opened = pts_sph
-        _, mask_keep = filter_points_by_plane(pts_sph, forward_sph, cut_distance=cut_distance)
+        _, mask_keep = filter_points_by_plane_sph(pts_sph, forward_sph, cut_distance=cut_distance)
 
     return pts_opened[mask_keep], pts_opened, mask_keep
 
-def open_world(forward_carte, pts_carte, cut_distance=None, cut_distance_percentile=90):
+def open_world_carte(forward_carte, pts_carte, opening_mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
+    assert opening_mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
+
+    if opening_mode == 'wall':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
+    elif opening_mode == 'cut+wall':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'cut+cylinder':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'remove_within_cone':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened = pts_sph
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'straight_cut':
+        pts_opened = pts_carte
+        kept_pts_carte, pts_carte, mask_keep, cut_distance = straight_cut(
+            forward_carte=forward_carte,
+            pts_carte=pts_carte,
+            cut_distance=cut_distance,
+            cut_distance_percentile=cut_distance_percentile
+        )
+
+    return pts_opened[mask_keep], pts_opened, mask_keep
+
+def straight_cut(forward_carte, pts_carte, cut_distance=None, cut_distance_percentile=90):
     """
     Open the world by cutting points behind a plane orthogonal to `forward_carte`.
 
@@ -1607,7 +2233,12 @@ if __name__ == "__main__":
     recovered_image = np.array(pil_image2) 
     assert np.all(image == recovered_image)
 
-
+    # Test open3d statistical outlier removal
+    colors = np.random.rand(1000, 3)  # random colors
+    pts = (np.random.rand(1000, 3)-0.5) * 10.0  # random 3D points
+    pts[::50] += np.random.rand(20, 3) * 50
+    pts_clean, colors_clean = GeometryTransforms.remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8)
+    print(f"Original points: {pts.shape[0]}, Cleaned points: {pts_clean.shape[0]}")
     # --- TEST OPEN WORLD ---- 
 
     # Optional: make 3D axes have equal aspect (so spheres look like spheres)
@@ -1622,9 +2253,11 @@ if __name__ == "__main__":
 
     pts_xyz = (np.random.rand(5000, 3)-0.5) * 10.0  # random 3D points
     forward = np.array([1.0, 0.0, 0.0])
-    kept_pts_carte, pts_carte, mask_keep = open_world(
+    kept_pts_carte, pts_carte, mask_keep = open_world_carte(
         forward_carte=forward,
-        pts_carte=pts_xyz, cut_distance_percentile=95
+        pts_carte=pts_xyz, 
+        opening_mode='cut+cylinder',
+        delta_cut=np.pi/3
     )
     pts_new = kept_pts_carte
     assert np.allclose(pts_new, pts_carte[mask_keep])
