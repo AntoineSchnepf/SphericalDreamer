@@ -1458,14 +1458,16 @@ class GeometryTransforms:
 
         # 6. Remove statistical outliers
         if remove_outliers: 
+            n_before = len(pts_cam_cartesian.reshape(-1,3))
             pts_cam_cartesian, colors = GeometryTransforms.remove_statistical_outliers(
                 pts=pts_cam_cartesian,
                 colors=colors,
                 nb_neighbors=20,
                 std_ratio=1.8
             )
+            n_after = len(pts_cam_cartesian.reshape(-1,3))
             if verbose:
-                print("e. (Optional) Outliers Removed.")
+                print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
 
         return pts_cam_cartesian, colors
 

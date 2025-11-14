@@ -461,27 +461,21 @@ if __name__ == "__main__":
         # "A wide field under daylight, covered in lush green grass with worn paths where the grass has been trampled by many footsteps. In the center of the field stands a large concert stage, decorated with bold triangular patterns. On the stage rests a single guitar, but no performers are present. In front of the stage, a lively crowd gathers, waiting for the show to begin."
     ]
     expnames=[
-        "24_campus",
-        "24_seaside",
-        "24_forest",
-        "24_city",
-        # "09_bali_aligned", 
-        # "forest", 
-        # "city", 
-        # "beach", 
-        # "the_stage",
+        "25_campus",
+        "25_seaside",
+        "25_forest",
+        "25_city",
     ]
     indoor_or_outdoor_list = [
         'outdoor',
         'outdoor',
         'indoor',
         'outdoor',
-        # 'outdoor',
     ]
     # ---------------
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=3)
+    parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=2)
     if debug:
         args = parser.parse_args([
             '--exp_id', '0'
@@ -553,7 +547,7 @@ if __name__ == "__main__":
         correct_walls=False,
         remove_sky=False,
         indoor_or_outdoor=None,
-        remove_outliers=False,
+        remove_outliers=True,
         verbose=True
     )
     sphere1 = my_utils.Sphere(
@@ -585,7 +579,7 @@ if __name__ == "__main__":
             correct_walls=False,
             remove_sky=False,
             indoor_or_outdoor=None,
-            remove_outliers=False,
+            remove_outliers=True,
             verbose=True
         )
         
