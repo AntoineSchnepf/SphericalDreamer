@@ -1889,10 +1889,8 @@ class GeometryTransforms:
 
 
 def run_corrective_pipeline_on_sphere(
-        pts, # in cartesian coordinates
-        pose, 
+        pts, # in cartesian coordinates (local camera frame)
         colors, 
-        sphere_radius, 
         height, width, 
         correct_depth, 
         near, 
@@ -1912,7 +1910,7 @@ def run_corrective_pipeline_on_sphere(
 
     # 1.  Convert to spherical coordinates
     final_pts = pts.copy()
-    pts_sph = world2cam_sph_3D(pts, pose)
+    pts_sph = carte2sph_3D(pts)
 
     # 2. Get Metric Depth
     if correct_depth:
@@ -1929,7 +1927,7 @@ def run_corrective_pipeline_on_sphere(
         if verbose:
             print("a. Metric Depth Obtained.")
     # 3. Merge back 
-    final_pts = cam_sph2world_3D(pts_sph, pose)
+    final_pts = sph2carte_3D(pts_sph)
 
     # 4. Correct Walls
     if correct_walls:

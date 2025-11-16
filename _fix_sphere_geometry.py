@@ -71,9 +71,7 @@ if __name__ == "__main__":
     ) 
     pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
         pts1_carte, # in cartesian coordinates
-        pose1, 
         colors1, 
-        sphere_radius, 
         height, width, 
         correct_depth=False, 
         near=NEAR, 
