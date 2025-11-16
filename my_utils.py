@@ -542,7 +542,6 @@ def cart2cyl_xaxis(pts):
 
     return np.stack((x, p, theta), axis=-1)
 
-
 def cyl2cart_xaxis(cyl):
     """
     Convert cylindrical coordinates (aligned with X-axis) -> Cartesian (X, Y, Z).

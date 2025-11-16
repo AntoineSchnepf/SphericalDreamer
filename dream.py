@@ -23,20 +23,20 @@ _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monod
 sys.path.append(_360monodepth_install_dir) 
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
+from egformer import get_egformer_depth
 import my_utils
 
 logging.disable(logging.CRITICAL + 1)
 
 
-
-
 class SphericalDreamer:
 
-    def __init__(self, pano_depth_temp_dir, pano_width=1440, pano_height=720, seed=119223):
+    def __init__(self, pano_depth_temp_dir, pano_width=1440, pano_height=720, depth_model='360mono', seed=119223):
 
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.pano_height = pano_height
         self.pano_width = pano_width
+        self.depth_model = depth_model
         self.seed = seed
         self.pano_depth_temp_dir = pano_depth_temp_dir
         self.flux_lora_pano_path = 'checkpoints/pano_lora_720*1440_v1.safetensors'
@@ -79,11 +79,21 @@ class SphericalDreamer:
 
         return pano_rgb
     
+    def estimate_pano_depth(self, pano_rgb:np.array):
+        if self .depth_model == '360mono':
+            return self.estimate_pano_depth_360mono(pano_rgb)
+        elif self.depth_model == 'egformer':
+            return self.estimate_pano_depth_egformer(pano_rgb)
+        else:
+            raise ValueError(f"Unknown depth model: {self.depth_model}. Should be either '360mono' or 'egformer'.")
+        
     @torch.no_grad()
-    def estimate_pano_depth(self, pano_rgb):
+    def estimate_pano_depth_360mono(self, pano_rgb:np.array):
         """
         args:
             `pano_rgb`: np.array of shape [pano_h,pano_w,3] and values in [0-255]        
+        returns:
+            pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1]
         """
         self.depth_estimator = Pano_depth_estimation(
             self.pano_height, 
@@ -94,6 +104,19 @@ class SphericalDreamer:
         )
         pano_depth = self.depth_estimator.get_panodepth(pano_rgb)  #[0-1] 
         return pano_depth  
+
+    @torch.no_grad()        
+    def estimate_pano_depth_egformer(self, pano_rgb:np.array):  
+        """
+        args:
+            `pano_rgb`: np.array of shape [pano_h,pano_w,3] and values in [0-255]       
+        returns:
+            pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1] 
+        """
+        pano_rgb_pil = Image.fromarray(pano_rgb.astype(np.uint8))
+        pano_depth_pil = get_egformer_depth([pano_rgb_pil])[0]
+        pano_depth = np.array(pano_depth_pil.convert("L")).astype(np.float32) / 255.0
+        return pano_depth
 
     def init_inpainting_model(self):
 
@@ -432,6 +455,25 @@ def split_new_points(pts, colors, pose1, pose2, forward):
     pts_neutral, colors_neutral = pts[where_neutral], colors[where_neutral]
     return (pts1, colors1), (pts2, colors2), (pts_neutral, colors_neutral)
 
+def correct_walls(x, y, p=6.0):
+    mask = y > 0
+    x_corr = x.copy()
+    y_corr = y.copy()
+
+    theta = np.atan2(y, x)
+    r = np.sqrt(x**2 + y**2)
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+
+    rho = 1.0 / (np.abs(cos_t)**p + np.abs(sin_t)**p)**(1.0/p)
+    x = r * rho * cos_t
+    y = r * rho * sin_t
+
+    x_corr[mask] = x[mask]
+    y_corr[mask] = y[mask]
+
+    return x_corr, y_corr
+
 
 
 if __name__ == "__main__":
@@ -446,12 +488,17 @@ if __name__ == "__main__":
     seeds = [119224, 119224+9, 119224+20, 119224+33, 119224+45]
     translation_direction = my_utils.get_norm_vector(np.array([1, 0, 0], dtype=np.float32))
     sphere_radius = 1.0
+    depth_model = "360mono"  # "360mono" or "egformer"
     FAR=1.0
     NEAR=0.01
     delta_walk =  FAR * np.pi / 2
     override_with_inpaint=False
-    width = 1440
-    height = 720
+    if depth_model == 'egformer':
+        width = 1024
+        height = 512
+    else:
+        width = 1440
+        height = 720
     prompts = [
         "A realistic illustration of a college campus. In the middle ground, several academic buildings with brick facades and large windows stand prominently. In the background, a bright blue sky with scattered clouds stretches across the scene. In the foreground, a few elements commonly found on campus, such as students walking, bicycles parked along a path, and a grassy lawn with trees, add depth and life to the scene.",
         "A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.",
@@ -461,10 +508,10 @@ if __name__ == "__main__":
         # "A wide field under daylight, covered in lush green grass with worn paths where the grass has been trampled by many footsteps. In the center of the field stands a large concert stage, decorated with bold triangular patterns. On the stage rests a single guitar, but no performers are present. In front of the stage, a lively crowd gathers, waiting for the show to begin."
     ]
     expnames=[
-        "25_campus",
-        "25_seaside",
-        "25_forest",
-        "25_city",
+        "27_campus",
+        "27_seaside",
+        "27_forest",
+        "27_city",
     ]
     indoor_or_outdoor_list = [
         'outdoor',
@@ -476,9 +523,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=2)
-    if debug:
+    if True:
         args = parser.parse_args([
-            '--exp_id', '0'
+            '--exp_id', '3'
         ])
         for _ in range(10):
             print(f"/!\ DEBUG MODE IS ON. Running exp {args.exp_id}/!\ ")
@@ -491,9 +538,9 @@ if __name__ == "__main__":
     spherical_dreamer = SphericalDreamer(
         pano_width=width,
         pano_height=height,
-        pano_depth_temp_dir='/tmp/pano_depth_temp'
+        pano_depth_temp_dir='/tmp/pano_depth_temp',
+        depth_model=depth_model,
     )
-
     save_dir_ = f"{save_dir}/{expname}"
     
     # PHASE 0. GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH
@@ -527,7 +574,7 @@ if __name__ == "__main__":
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [0, 0, 0, 1]
-    ], dtype=np.float32)    
+    ], dtype=np.float32)
 
 
     colors1, depth1 = my_utils.load_rgbd_pano(
