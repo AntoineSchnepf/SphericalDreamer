@@ -510,6 +510,71 @@ def depth2world(depth, pose, sphere_radius, height, width):
     points_3D_world_carte = np.einsum('ij,...j->...i', pose, cat_ones(points_3D_cam_carte))[..., :3]
     return points_3D_world_carte
 
+def cart2cyl_xaxis(pts):
+    """
+    Convert Cartesian (X, Y, Z) -> cylindrical coordinates aligned with the X-axis.
+    
+    Works with any input shape [..., 3].
+
+    Convention:
+      - x = X               (axis along +X)
+      - p = sqrt(Y^2 + Z^2) (radial distance)
+      - theta = atan2(Z, Y) in [-pi, pi], with theta=0 pointing toward +Y.
+
+    Parameters
+    ----------
+    pts : np.ndarray, shape (..., 3)
+        Cartesian points [X, Y, Z].
+
+    Returns
+    -------
+    cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [x, p, theta].
+    """
+    pts = np.asarray(pts, dtype=float)
+    if pts.shape[-1] != 3:
+        raise ValueError("Input must have shape [..., 3].")
+        
+    X, Y, Z = np.moveaxis(pts, -1, 0)
+    x = X
+    p = np.sqrt(Y**2 + Z**2)
+    theta = np.arctan2(Z, Y)  # θ=0 along +Y, increases toward +Z
+
+    return np.stack((x, p, theta), axis=-1)
+
+
+def cyl2cart_xaxis(cyl):
+    """
+    Convert cylindrical coordinates (aligned with X-axis) -> Cartesian (X, Y, Z).
+    
+    Works with any input shape [..., 3].
+
+    Convention (inverse of cart2cyl_xaxis):
+      - X = x
+      - Y = p * cos(theta)
+      - Z = p * sin(theta)
+
+    Parameters
+    ----------
+    cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [x, p, theta].
+
+    Returns
+    -------
+    pts : np.ndarray, shape (..., 3)
+        Cartesian points [X, Y, Z].
+    """
+    cyl = np.asarray(cyl, dtype=float)
+    if cyl.shape[-1] != 3:
+        raise ValueError("Input must have shape [..., 3].")
+        
+    x, p, theta = np.moveaxis(cyl, -1, 0)
+    X = x
+    Y = p * np.cos(theta)
+    Z = p * np.sin(theta)
+
+    return np.stack((X, Y, Z), axis=-1)
+
 # def cam_erp2cam_sph_3D(points_2D_cam_erp, height, width, depth, sphere_radius=1.0):
 #     """
 #     Convert Equirectangular coordinates to camera spherical coordinates.
