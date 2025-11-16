@@ -16,7 +16,7 @@ from sklearn.cluster import MiniBatchKMeans
 from scipy.sparse import diags
 from scipy.sparse.linalg import cg, splu
 import time
-
+from scipy.interpolate import RegularGridInterpolator
 
 
 # -------------------------------------------- #
@@ -542,7 +542,6 @@ def cart2cyl_xaxis(pts):
 
     return np.stack((x, p, theta), axis=-1)
 
-
 def cyl2cart_xaxis(cyl):
     """
     Convert cylindrical coordinates (aligned with X-axis) -> Cartesian (X, Y, Z).
@@ -572,6 +571,70 @@ def cyl2cart_xaxis(cyl):
     X = x
     Y = p * np.cos(theta)
     Z = p * np.sin(theta)
+
+    return np.stack((X, Y, Z), axis=-1)
+
+def cart2cyl_zaxis(pts):
+    """
+    Convert Cartesian (X, Y, Z) -> cylindrical coordinates aligned with the Z-axis.
+
+    Works with any input shape [..., 3].
+
+    Convention:
+      - z = Z               (axis along +Z)
+      - p = sqrt(X^2 + Y^2) (radial distance in the XY plane)
+      - theta = atan2(Y, X) in [-pi, pi], with theta=0 pointing toward +X.
+
+    Parameters
+    ----------
+    pts : np.ndarray, shape (..., 3)
+        Cartesian points [X, Y, Z].
+
+    Returns
+    -------
+    cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [z, p, theta].
+    """
+    pts = np.asarray(pts, dtype=float)
+    if pts.shape[-1] != 3:
+        raise ValueError("Input must have shape [..., 3].")
+
+    X, Y, Z = np.moveaxis(pts, -1, 0)
+    z = Z
+    p = np.sqrt(X**2 + Y**2)
+    theta = np.arctan2(Y, X)  # θ=0 along +X, increases toward +Y
+
+    return np.stack((z, p, theta), axis=-1)
+
+def cyl2cart_zaxis(cyl):
+    """
+    Convert cylindrical coordinates (aligned with Z-axis) -> Cartesian (X, Y, Z).
+
+    Works with any input shape [..., 3].
+
+    Convention (inverse of cart2cyl_zaxis):
+      - Z = z
+      - X = p * cos(theta)
+      - Y = p * sin(theta)
+
+    Parameters
+    ----------
+    cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [z, p, theta].
+
+    Returns
+    -------
+    pts : np.ndarray, shape (..., 3)
+        Cartesian points [X, Y, Z].
+    """
+    cyl = np.asarray(cyl, dtype=float)
+    if cyl.shape[-1] != 3:
+        raise ValueError("Input must have shape [..., 3].")
+
+    z, p, theta = np.moveaxis(cyl, -1, 0)
+    Z = z
+    X = p * np.cos(theta)
+    Y = p * np.sin(theta)
 
     return np.stack((X, Y, Z), axis=-1)
 
@@ -1176,7 +1239,7 @@ class GeometryTransforms:
         return np.abs(x - y)
 
     @staticmethod
-    def correct_floor_v1(P, depth_map_eqr, error_type='l1', plot=False):
+    def correct_floor_old(P, depth_map_eqr, error_type='l1', plot=False):
         """
         Correct points using trigonometry and an heuristic to make the floor flat
         The next version is better. Keeping this one just for reference.
@@ -1261,111 +1324,368 @@ class GeometryTransforms:
         return corrected_pts, correction, correction_raw, strength
 
     @staticmethod
-    def correct_floor(P, height, width, plot=True):
+    def build_floor_correction(
+        X, Y, Z, theta,
+        *,
+        correct_until_depth_metric,
+        dx=0.05, dy=0.05,
+        q=10.0,
+        theta_min=-np.pi, theta_max=0.0,
+        min_pts_per_bin=10,
+        gaussian_sigma_xy=(1.0, 1.0),
+        reference_level='horizon',  # 'horizon' | 'median' | 'mean' | float
+        epsilon=0.0,                 # optional C^1 blend width at Y boundaries (meters)
+        plot_horizon=False,
+        plot_floor_profile=False,
+        horizon_deg=(-10.0, -1.0),
+        horizon_colors=None,         # optional colors aligned with input if you plot horizon
+    ):
         """
-        Corrects a 3D point cloud so that the detected floor becomes flat.
+        Tools to estimate a road-floor correction surface C(x,y) from a 3D point cloud,
+        using only points below the horizon (theta in (-pi, 0)), then apply this correction
+        to all points. The correction is computed on a (x,y) grid as a *low percentile*
+        (robust floor) of Z per cell, filled and smoothed to form a continuous surface.
 
-        This function identifies and models the lowest (floor) surface of a 
-        point cloud, assuming the floor corresponds to the lower envelope 
-        of the (Z, sqrt(X² + Y²)) profile below the horizon. It fits a 
-        non-decreasing local-minimum interpolator to estimate the floor height 
-        as a function of radial distance from the origin, and then vertically 
-        adjusts all points so that this estimated floor becomes flat.
+        Key features
+        ------------
+        - Robust floor estimate via low-percentile per (x,y) bin.
+        - Holes filled by nearest-value, then Gaussian-smoothed.
+        - Reference level can be the "horizon" band, grid median/mean, or a constant.
+        - `C(x,y)` is *truncated by continuity* outside |Y| <= correct_until_depth_metric:
+            C(x,y<Ymin) := C(x, Ymin)  and  C(x,y>Ymax) := C(x, Ymax)
+        (Optionally with a C^1 soft blend width `epsilon`.)
+        - All plotting is optional and OFF by default.
 
         Parameters
         ----------
-        P : ndarray of shape (..., 3)
-            Input 3D point cloud. Each row or voxel corresponds to (X, Y, Z)
-            coordinates in world or sensor space.
-        plot : bool, optional, default=True
-            If True, plots the original (C, Z) data below the horizon and the 
-            fitted floor profile for visual inspection.
+        X, Y, Z, theta : array_like (same shape)
+            Point cloud coordinates and polar angle per point (radians).
+            Only points with theta ∈ (theta_min, theta_max) are used to estimate the floor.
+        correct_until_depth_metric : float
+            Y-band half-width; `C(x,y)` is prolonged by continuity outside
+            [-correct_until_depth_metric, +correct_until_depth_metric]:
+                C(x,y<Ymin) := C(x, Ymin),  C(x,y>Ymax) := C(x, Ymax).
+        dx, dy : float
+            Grid resolutions along X and Y for the floor estimation (meters).
+        q : float
+            Low percentile (e.g., 5–10) used as robust floor per (x,y) cell.
+        theta_min, theta_max : float
+            Horizon mask range (radians) used for selecting floor points. Default (-π, 0).
+        min_pts_per_bin : int
+            Minimum number of points to accept a bin; others are filled by nearest.
+        gaussian_sigma_xy : (float, float)
+            Gaussian smoothing sigmas (in *cells*, not meters) along (X,Y).
+        reference_level : {'horizon','median','mean'} or float
+            Base level z0 for the correction: horizon-band mean, grid median/mean, or fixed float.
+        epsilon : float
+            Optional blend half-width (meters) to make the boundary transitions C^1. Set 0 for hard.
+        plot_horizon : bool
+            If True, show the 3D scatter of the horizon band used for 'horizon' reference.
+        plot_floor_profile : bool
+            If True, show the estimated floor Z(x,y) as an image.
+        horizon_deg : (float, float)
+            Angular band in degrees for the horizon (used if reference_level='horizon').
+        horizon_colors : array_like or None
+            Optional per-point colors for the horizon 3D scatter (if plotted).
 
         Returns
         -------
-        P_corrected : ndarray of shape (..., 3)
-            The point cloud after applying the vertical correction that flattens 
-            the floor. The Z-axis is adjusted such that the estimated floor 
-            becomes level at the mean horizon height.
-        correction_raw : ndarray of shape (..., 3)
-            The vertical displacement applied to each point (ΔX, ΔY, ΔZ). 
-            Only the Z component is non-zero.
-
-        Notes
-        -----
-        The correction is derived as follows:
-
-        1. Convert the 3D points (X, Y, Z) to polar coordinates 
-        `C = sqrt(X² + Y²)` and select only the region below the horizon.
-        2. Fit a smooth, non-decreasing local-minimum interpolator 
-        `Z_floor(C)` to the lowest observed points in each radial bin.
-        This ensures that the estimated floor height is monotonic with 
-        respect to distance and not affected by local noise or clutter.
-        3. Estimate the mean horizon height `Z_horizon` using points near 
-        the horizon band.
-        4. Compute the per-point correction along Z as 
-        `ΔZ = Z_horizon - Z_floor(C)`, and apply it to flatten the floor.
-
-        The result is a geometrically corrected point cloud where the 
-        ground plane appears level, useful for visualization, mapping, 
-        or downstream processing.
-
-        See Also
-        --------
-        Regression1D.fit_local_min_knots_monotone_interpolator_1d : 
-            Used internally to fit the monotone local-minimum interpolator.
-        get_canonical_sph_pixels : 
-            Provides the spherical pixel mapping used to select points 
-            below the horizon.
+        C_func : callable
+            Function C(x, y) returning the correction. Continuous prolongation is enforced
+            along Y outside [-correct_until_depth_metric, +correct_until_depth_metric].
+        grid : tuple of (x_centers, y_centers)
+            Regular grid used to estimate Zfloor.
+        Zfloor : ndarray, shape (len(x_centers), len(y_centers))
+            Smoothed floor surface on the grid (before subtracting z0).
         """
-        sph_canon = get_canonical_sph_pixels(height, width)
-        phi_range = (
-            np.deg2rad(0), np.deg2rad(360)
+        # --- 0) sanitize input ---
+        X = np.asarray(X); Y = np.asarray(Y); Z = np.asarray(Z); theta = np.asarray(theta)
+        if not (X.shape == Y.shape == Z.shape == theta.shape):
+            raise ValueError("X, Y, Z, theta must have the same shape.")
+
+        # --- 1) mask by theta in (theta_min, theta_max) ---
+        mask = (theta > theta_min) & (theta < theta_max) & np.isfinite(Z)
+        Xg, Yg, Zg = X[mask], Y[mask], Z[mask]
+        if Xg.size == 0:
+            raise ValueError("No points remain after theta masking; check theta range.")
+
+        # --- 2) build grid along X,Y using masked points extent ---
+        x_min, x_max = np.min(Xg), np.max(Xg)
+        y_min, y_max = np.min(Yg), np.max(Yg)
+        x_edges = np.arange(x_min, x_max + dx, dx)
+        y_edges = np.arange(y_min, y_max + dy, dy)
+        x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+        y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+        H, W = x_centers.size, y_centers.size
+
+        # bin indices for masked points
+        ix = np.clip(np.digitize(Xg, x_edges) - 1, 0, H - 1)
+        iy = np.clip(np.digitize(Yg, y_edges) - 1, 0, W - 1)
+
+        # --- 3) per-bin low-percentile floor ---
+        flat_idx = ix * W + iy
+        order = np.argsort(flat_idx)
+        flat_idx_sorted = flat_idx[order]
+        Z_sorted = Zg[order]
+
+        Zfloor = np.full((H, W), np.nan, dtype=float)
+        counts = np.zeros((H, W), dtype=int)
+
+        start = 0
+        n = flat_idx_sorted.size
+        while start < n:
+            stop = start + 1
+            key = flat_idx_sorted[start]
+            while stop < n and flat_idx_sorted[stop] == key:
+                stop += 1
+            i, j = divmod(key, W)
+            Zij = Z_sorted[start:stop]
+            counts[i, j] = Zij.size
+            if Zij.size >= min_pts_per_bin:
+                Zfloor[i, j] = np.percentile(Zij, q)
+            start = stop
+
+        # --- 4) nearest fill for holes ---
+        valid = np.isfinite(Zfloor)
+        if not np.any(valid):
+            raise ValueError("All bins empty; increase min_pts_per_bin or adjust dx/dy.")
+        _, (ii, jj) = ndimage.distance_transform_edt(~valid, return_indices=True)
+        Zfilled = Zfloor.copy()
+        Zfilled[~valid] = Zfloor[ii[~valid], jj[~valid]]
+
+        # --- 5) smooth the surface ---
+        sx, sy = gaussian_sigma_xy
+        if sx > 0 or sy > 0:
+            Zsmooth = ndimage.gaussian_filter(Zfilled, sigma=(sx, sy))
+        else:
+            Zsmooth = Zfilled
+
+        # --- 6) choose reference level z0 ---
+        if reference_level == "horizon":
+            lo, hi = np.deg2rad(horizon_deg[0]), np.deg2rad(horizon_deg[1])
+            # two symmetric bands around pi for wrap
+            mask1 = in_interval_mod(theta, lo, hi)
+            # symmetric around pi: (π - lo, π - hi) but order might flip:
+            lo2, hi2 = (np.pi - lo), (np.pi - hi)
+            mask2 = in_interval_mod(theta, min(lo2, hi2), max(lo2, hi2))
+            horizon_mask = (mask1 | mask2) & np.isfinite(Z)
+            if not np.any(horizon_mask):
+                raise ValueError("No points in horizon band; adjust horizon_deg or data.")
+            z0 = np.nanmean(Z[horizon_mask])
+
+            if plot_horizon:
+                fig = plt.figure(figsize=(8, 5))
+                ax = fig.add_subplot(111, projection='3d')
+                if horizon_colors is None:
+                    ax.scatter(X[horizon_mask], Y[horizon_mask], Z[horizon_mask], s=1, c='orange')
+                else:
+                    ax.scatter(X[horizon_mask], Y[horizon_mask], Z[horizon_mask], s=1,
+                               c=np.asarray(horizon_colors)[horizon_mask])
+                ax.set_title('Horizon band points used for reference level')
+                ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
+                plt.tight_layout(); plt.show()
+        elif reference_level == "median":
+            z0 = np.nanmedian(Zsmooth)
+        elif reference_level == "mean":
+            z0 = np.nanmean(Zsmooth)
+        else:
+            z0 = float(reference_level)
+
+        # --- 7) build correction grid and continuous prolongation C(x,y) ---
+        C_grid = -(Zsmooth - z0)  # so Z_corrected = Z + C(x,y)
+
+        C_interp = RegularGridInterpolator(
+            (x_centers, y_centers), C_grid, bounds_error=False, fill_value=None
         )
-        below_horizon_mask_and_phi_in_range = (sph_canon[..., 0] < 0) & (sph_canon[..., 1] >= phi_range[0]) & (sph_canon[..., 1] <= phi_range[1])
-        X_bh, Y_bh, Z_bh = P[below_horizon_mask_and_phi_in_range].T
-        c_bh = np.sqrt(X_bh**2 + Y_bh**2)
 
-        bandwidth = 0.05 * (np.max(c_bh) - np.min(c_bh)) 
-        t0 = time.time()
-        f_approx = Regression1D.fit_local_min_knots_monotone_interpolator_1d(c_bh, Z_bh, bandwidth=bandwidth)
-        print("Regression for depth correction took:", time.time() - t0)
-        
-        # compute correction
-        thetas = sph_canon[..., 0]
-        horizon_theta_range=(
-            np.deg2rad(-10), np.deg2rad(-1) 
-        )
-        horizon_band_mask = (thetas[:,0] >= horizon_theta_range[0]) & (thetas[:,0] <= horizon_theta_range[1])
-        les_z_in_band = P[horizon_band_mask, ..., 2]
-        z_horizon = np.nanmean(les_z_in_band)
+        # boundaries for continuity prolongation along Y
+        Ymin_band = -float(correct_until_depth_metric)
+        Ymax_band = +float(correct_until_depth_metric)
+        # ensure we evaluate *on the grid* when we sample boundary traces:
+        Ymin_eval = float(np.clip(Ymin_band, y_centers[0], y_centers[-1]))
+        Ymax_eval = float(np.clip(Ymax_band, y_centers[0], y_centers[-1]))
 
-        correction_raw = np.zeros_like(P)
-        c_input = np.sqrt(P[...,0]**2 + P[...,1]**2)
-        correction_raw = z_horizon - f_approx(c_input)
-        correction_raw = correction_raw[..., None] * np.array([0, 0, 1])
-        P_corrected = P + correction_raw
+        def _smoothstep(t):
+            return t*t*(3 - 2*t)
 
-        if plot:
-            plt.figure()
-            plt.title("Z values below horizon")
-            plt.scatter(c_bh, Z_bh, s=1, label='Data Points')
-            les_c = np.linspace(np.min(c_bh), np.max(c_bh), 100)
+        def C_func(x, y):
+            """
+            Evaluate the correction with continuous prolongation outside the Y band.
 
-            les_z_approx = f_approx(les_c)
-            plt.plot(les_c, les_z_approx, color='r', label='Kernel Regression Fit')
-            plt.xlabel("C = sqrt(X^2 + Y^2)")
-            plt.ylabel("Z values")
-            plt.legend()
+            For y < Ymin: returns C(x, Ymin).
+            For y > Ymax: returns C(x, Ymax).
+            For y within [Ymin, Ymax]: returns C(x, y) from the interpolator.
+            If epsilon > 0, blends across [Ymin-eps, Ymin] and [Ymax, Ymax+eps] for C^1.
+            """
+            x = np.asarray(x, dtype=float)
+            y = np.asarray(y, dtype=float)
+            shp = np.shape(x)
+
+            xf = x.ravel()
+            yf = y.ravel()
+
+            # Evaluate boundary traces (functions of x)
+            c_low  = C_interp(np.column_stack([xf, np.full_like(xf, Ymin_eval)]))
+            c_high = C_interp(np.column_stack([xf, np.full_like(xf, Ymax_eval)]))
+
+            c = np.empty_like(xf, dtype=float)
+
+            if epsilon <= 0:
+                # Hard (C^0) continuation
+                mask_low  = (yf <= Ymin_band)
+                mask_high = (yf >= Ymax_band)
+                mask_mid  = ~(mask_low | mask_high)
+
+                # interior (clamped to grid Y-range)
+                y_mid = np.clip(yf[mask_mid], y_centers[0], y_centers[-1])
+                c[mask_mid] = C_interp(np.column_stack([xf[mask_mid], y_mid]))
+                c[mask_low]  = c_low[mask_low]
+                c[mask_high] = c_high[mask_high]
+            else:
+                # Smooth (C^1) blend of width epsilon
+                mask_low_outer   = (yf <= Ymin_band - epsilon)
+                mask_low_blend   = (yf >  Ymin_band - epsilon) & (yf < Ymin_band)
+                mask_mid         = (yf >= Ymin_band) & (yf <= Ymax_band)
+                mask_high_blend  = (yf >  Ymax_band) & (yf < Ymax_band + epsilon)
+                mask_high_outer  = (yf >= Ymax_band + epsilon)
+
+                # outer regions
+                c[mask_low_outer]  = c_low[mask_low_outer]
+                c[mask_high_outer] = c_high[mask_high_outer]
+
+                # mid region
+                if np.any(mask_mid):
+                    y_mid = np.clip(yf[mask_mid], y_centers[0], y_centers[-1])
+                    c[mask_mid] = C_interp(np.column_stack([xf[mask_mid], y_mid]))
+
+                # blends
+                if np.any(mask_low_blend):
+                    yb = yf[mask_low_blend]
+                    t = (yb - (Ymin_band - epsilon)) / epsilon  # 0..1
+                    w = _smoothstep(t)
+                    y_eval = np.clip(np.minimum(yb, Ymin_band), y_centers[0], y_centers[-1])
+                    c_int = C_interp(np.column_stack([xf[mask_low_blend], y_eval]))
+                    c[mask_low_blend] = (1 - w) * c_low[mask_low_blend] + w * c_int
+
+                if np.any(mask_high_blend):
+                    yb = yf[mask_high_blend]
+                    t = (yb - Ymax_band) / epsilon  # 0..1
+                    w = _smoothstep(t)
+                    y_eval = np.clip(np.maximum(yb, Ymax_band), y_centers[0], y_centers[-1])
+                    c_int = C_interp(np.column_stack([xf[mask_high_blend], y_eval]))
+                    c[mask_high_blend] = (1 - w) * c_int + w * c_high[mask_high_blend]
+
+            return c.reshape(shp)
+
+        # --- optional floor plot ---
+        if plot_floor_profile:
+            # Evaluate C_func on a dense grid to visualize the prolongation
+            Xg, Yg = np.meshgrid(x_centers, y_centers, indexing='ij')
+            C_vis = C_func(Xg, Yg)
+
+            fig, axes = plt.subplots(1, 2, figsize=(13, 5), constrained_layout=True)
+
+            # --- Left: floor map ---
+            im0 = axes[0].imshow(
+                Zsmooth.T, origin='lower', aspect='auto',
+                extent=[x_centers[0], x_centers[-1], y_centers[0], y_centers[-1]],
+                cmap='viridis'
+            )
+            axes[0].set_title('Estimated floor Z(x, y)')
+            axes[0].set_xlabel('X'); axes[0].set_ylabel('Y')
+            fig.colorbar(im0, ax=axes[0], label='Z_floor')
+
+            # --- Right: correction map ---
+            im1 = axes[1].imshow(
+                C_vis.T, origin='lower', aspect='auto',
+                extent=[x_centers[0], x_centers[-1], y_centers[0], y_centers[-1]],
+                cmap='plasma'
+            )
+            axes[1].axhline(-correct_until_depth_metric, color='w', ls='--', lw=1)
+            axes[1].axhline(+correct_until_depth_metric, color='w', ls='--', lw=1)
+            axes[1].set_title('Correction surface C(x, y)\n(with prolongation beyond Y-band)')
+            axes[1].set_xlabel('X'); axes[1].set_ylabel('Y')
+            fig.colorbar(im1, ax=axes[1], label='C(x, y)')
+
             plt.show()
 
-            plt.figure()
-            plt.imshow(correction_raw[..., 2], cmap='jet')
-            plt.title("Raw Depth Correction (new method)")
-            plt.colorbar()
-            plt.show()
+        return C_func, (x_centers, y_centers), Zsmooth
+
+    @staticmethod
+    def correct_floor_v3(
+        pts_carte, theta, colors, correct_until_depth_metric,
+        *,
+        dx=0.1, dy=0.1, q=10.0,
+        theta_min=-np.pi, theta_max=0.0,
+        min_pts_per_bin=10,
+        gaussian_sigma_xy=(1.0, 1.0),
+        reference_level='horizon',
+        epsilon=0.0,
+        plot_horizon=False,
+        plot_floor_profile=False,
+        horizon_deg=(-10.0, -1.0),
+    ):
+        """
+        Build the correction C(x,y), apply it to all points, and (optionally) plot.
+
+        Parameters
+        ----------
+        pts_carte : array_like (..., 3)
+        theta : array_like (...)
+        colors : array_like (...)
+            Only used if plot_horizon=True (for 3D scatter coloring).
+        correct_until_depth_metric : float
+            Y half-width of correction band for continuous prolongation.
+        dx, dy, q, theta_min, theta_max, min_pts_per_bin, gaussian_sigma_xy,
+        reference_level, epsilon, plot_horizon, plot_floor_profile, horizon_deg : see
+            `build_floor_correction`.
+
+        Returns
+        -------
+        X, Y, Z_corrected : ndarrays
+        """
+
+        X, Y, Z = pts_carte[..., 0], pts_carte[..., 1], pts_carte[..., 2]
+
+        C_func, (xc, yc), Zfloor = GeometryTransforms.build_floor_correction(
+            X, Y, Z, theta,
+            correct_until_depth_metric=correct_until_depth_metric,
+            dx=dx, dy=dy, q=q,
+            theta_min=theta_min, theta_max=theta_max,
+            min_pts_per_bin=min_pts_per_bin,
+            gaussian_sigma_xy=gaussian_sigma_xy,
+            reference_level=reference_level,
+            epsilon=epsilon,
+            plot_horizon=plot_horizon,
+            plot_floor_profile=plot_floor_profile,
+            horizon_deg=horizon_deg,
+            horizon_colors=colors,
+        )
+
+        C_all = C_func(X, Y)
+        Z_corrected = Z + C_all
+
+
+        mask = (theta > -np.pi) & (theta < 0)
+        plt.figure(figsize=(10,4))
+        plt.subplot(2,2,1)
+        plt.scatter(Y[mask], Z[mask], s=1, c='steelblue'); plt.grid(True)
+        plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before (masked θ∈(-π,0))')
+        plt.subplot(2,2,2)
+        plt.scatter(Y[mask], Z_corrected[mask], s=1, c='crimson'); plt.grid(True)
+        plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction (masked)')
+
+        plt.subplot(2,2,3)
+        plt.scatter(Y, Z, s=1, c='steelblue'); plt.grid(True)
+        plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before ')
+        plt.subplot(2,2,4)
+        plt.scatter(Y, Z_corrected, s=1, c='crimson'); plt.grid(True)
+        plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction')
+
+        plt.tight_layout(); plt.show()
         
-        return P_corrected
+        pts_corrected = np.stack((X, Y, Z_corrected), axis=-1)
+        return pts_corrected
 
     @staticmethod
     def get_sky_mask(
@@ -1390,7 +1710,7 @@ class GeometryTransforms:
         return t * t * (3.0 - 2.0 * t)
 
     @staticmethod
-    def correct_walls(
+    def correct_walls_v1(
             pts_sph,
             theta_range,
             edge=np.deg2rad(8.0),
@@ -1447,6 +1767,38 @@ class GeometryTransforms:
         return pts_corrected_carte
     
     @staticmethod
+    def correct_walls_lp(pts_carte, p=6.0):
+        """
+        Correct wall geometry using Lp transform for a sphere. Assumes Z-axis is up and apply the transform in all radial directions.
+        """
+        pt1_cyl = cart2cyl_zaxis(pts_carte)
+        r_c, z = pt1_cyl[..., 0], pt1_cyl[..., 1]
+
+        mask = z > 0
+        r_c_corr = r_c.copy()
+        z_corr = z.copy()
+
+        theta = np.atan2(z, r_c)
+        r = np.sqrt(r_c**2 + z**2)
+        cos_t = np.cos(theta)
+        sin_t = np.sin(theta)
+
+        rho = 1.0 / (np.abs(cos_t)**p + np.abs(sin_t)**p)**(1.0/p)
+        r_c = r * rho * cos_t
+        z = r * rho * sin_t
+
+        r_c_corr[mask] = r_c[mask]
+        z_corr[mask] = z[mask]
+
+        pt1_cyl[..., 0] = r_c_corr
+        pt1_cyl[..., 1] = z_corr
+        pts1_carte_corrected = cyl2cart_zaxis(pt1_cyl)
+
+        return pts1_carte_corrected
+
+
+
+    @staticmethod
     def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8):
         import open3d as o3d
         pcd = PointCloud(pts, colors).get_o3d_pointcloud()
@@ -1456,9 +1808,8 @@ class GeometryTransforms:
         return inlier_pts, inlier_colors
 
     @staticmethod
-    def run_corrective_pipeline(colors, depth, sphere_radius, height, width, correct_depth, near, far, correct_floor, correct_walls, remove_sky, indoor_or_outdoor, remove_outliers, verbose=False):
-        #TODO:
-        # - docstring
+    def run_corrective_pipeline_depreciated(colors, depth, sphere_radius, height, width, correct_depth, near, far, correct_floor, correct_walls, remove_sky, indoor_or_outdoor, remove_outliers, verbose=False):
+        #TODO:delete this after testing the next one
 
         assert not np.any(np.isnan(depth)), "Depth contains NaNs!"
         assert indoor_or_outdoor in ['indoor', 'outdoor', None], "indoor_or_outdoor must be either 'indoor' or 'outdoor'"
@@ -1536,6 +1887,111 @@ class GeometryTransforms:
 
         return pts_cam_cartesian, colors
 
+
+def run_corrective_pipeline_on_sphere(
+        pts, # in cartesian coordinates
+        pose, 
+        colors, 
+        sphere_radius, 
+        height, width, 
+        correct_depth, 
+        near, 
+        far, 
+        correct_walls, 
+        correct_floor, 
+        depth_threshold_for_floor_correction, 
+        remove_sky, 
+        indoor_or_outdoor, 
+        remove_outliers, 
+        verbose=False,
+        plot=False,
+    ):
+    "assunmes points in cartesian coordinates"
+
+    assert indoor_or_outdoor in ['indoor', 'outdoor', None], "indoor_or_outdoor must be either 'indoor' or 'outdoor'"
+
+    # 1.  Convert to spherical coordinates
+    final_pts = pts.copy()
+    pts_sph = world2cam_sph_3D(pts, pose)
+
+    # 2. Get Metric Depth
+    if correct_depth:
+        depth = pts_sph[..., 2]  # radial distances
+        depth_corrected = GeometryTransforms.depth_transform(
+            depth, 
+            method="inv", 
+            n=near, 
+            f=far, 
+            gamma=5,
+            plot=plot
+        )
+        pts_sph[..., 2] = depth_corrected
+        if verbose:
+            print("a. Metric Depth Obtained.")
+    # 3. Merge back 
+    final_pts = cam_sph2world_3D(pts_sph, pose)
+
+    # 4. Correct Walls
+    if correct_walls:
+        final_pts = GeometryTransforms.correct_walls_lp(
+            pts_carte=final_pts,
+            p=6.0 #correction strenght
+        )
+    
+    
+    # 5. Correct Floor
+    if correct_floor:
+        if correct_depth:
+            correct_until_depth_metric = GeometryTransforms.depth_transform(
+                np.array([depth_threshold_for_floor_correction]), 
+                method="inv", 
+                n=near, 
+                f=far, 
+                gamma=5,
+                plot=plot
+            )[0]
+            print(f"Using depth threshold for floor correction (metric): {correct_until_depth_metric:.2f}m")
+        else:
+            correct_until_depth_metric = depth_threshold_for_floor_correction
+        theta = carte2sph_3D(final_pts)[..., 0]
+        final_pts = GeometryTransforms.correct_floor_v3(
+            pts_carte=final_pts,
+            theta=theta,
+            colors=colors,
+            correct_until_depth_metric=correct_until_depth_metric,
+            dx=0.05,
+            dy=0.05,
+            plot_floor_profile=plot,
+        )
+
+        if verbose:
+            print("b. Cylindrical Floor Corrected.")
+
+    # 6. remove sky points
+    if remove_sky:
+        assert indoor_or_outdoor == 'outdoor', "Sky removal can only be done for outdoor scenes."
+        sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
+        final_pts[sky_mask] = np.array([np.nan, np.nan, np.nan])
+        #TODO: plot a figure showing the sky mask as an overlay over the image.
+        raise NotImplementedError("Sky removal is deperecitated rn")
+
+        if verbose:
+            print("d. (Optional) Sky Removed.")
+
+    # 7. Remove statistical outliers
+    if remove_outliers: 
+        n_before = len(final_pts.reshape(-1,3))
+        final_pts, colors = GeometryTransforms.remove_statistical_outliers(
+            pts=final_pts,
+            colors=colors,
+            nb_neighbors=20,
+            std_ratio=1.8
+        )
+        n_after = len(final_pts.reshape(-1,3))
+        if verbose:
+            print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
+    
+    return final_pts, colors
 
 # ----------------------------- #
 # ----- Utility functions ----- #
