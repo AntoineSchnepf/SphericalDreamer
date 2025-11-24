@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     # --- parse args: which sphere to load --- #
     expname = "24_city"
-    dream_iter = 0
+    dream_iter = 2
     open_right = True
     open_left = False
     # ---------------------------------------- #
@@ -48,6 +48,10 @@ if __name__ == "__main__":
         'opening_mode': 'cut+cylinder',
         'delta_cut': 2*np.pi/3,
     }
+    # opening_kwargs = {
+    #     'opening_mode': 'straight_cut+disk_to_square_displacement',
+    #     'cut_distance':0.8,
+    # }
     pose1 = np.array([
         [1, 0, 0, 0],
         [0, 1, 0, 0],
@@ -76,7 +80,7 @@ if __name__ == "__main__":
         correct_depth=False, 
         near=NEAR, 
         far=FAR, 
-        correct_walls=True, 
+        correct_walls=False, 
         correct_floor=True, 
         depth_threshold_for_floor_correction=0.6, 
         remove_sky=False, 
@@ -85,7 +89,6 @@ if __name__ == "__main__":
         verbose=False,
         plot=True,
     )
-
 
 
     sphere1 = my_utils.Sphere(
