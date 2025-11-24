@@ -864,7 +864,7 @@ def camera_translation(pose, translation):
 
 
 # ---------------------------------------- #
-# ------- Depth Correction utils  -------- #
+# ------- Geometry Correction utils  ----- #
 # ---------------------------------------- #
 class Regression1D:
 
@@ -1694,13 +1694,13 @@ class GeometryTransforms:
             height,
             width,
             thetas_range_for_sky_detection = (np.deg2rad(80), np.deg2rad(90)),
-            eps = 0.5
+            eps = 0.05
         ):
 
         thetas = get_canonical_sph_pixels(height, width)[..., 0]
         sky_theta_mask = (thetas >= thetas_range_for_sky_detection[0]) & (thetas <= thetas_range_for_sky_detection[1])
         depth_sky_values = depth_map[sky_theta_mask]
-        threshold = np.nanmean(depth_sky_values) - eps * np.nanstd(depth_sky_values)
+        threshold = np.nanmean(depth_sky_values) - eps # * np.nanstd(depth_sky_values)
         sky_mask = depth_map >= threshold
         return sky_mask
 
@@ -1797,7 +1797,15 @@ class GeometryTransforms:
 
         return pts1_carte_corrected
 
-
+    @staticmethod
+    def correct_walls_v2(pts_carte):
+        """Unfolds sphere into a cylinder of prinpal axis Z."""
+        pts_sph = carte2sph_3D(pts_carte)
+        up = np.array([0, 0, 1])
+        up_sph = carte2sph_3D(up)
+        pts_prime_sph = unfold_points_on_cylinder(pts_sph, up_sph)
+        pts_prime = sph2carte_3D(pts_prime_sph)
+        return pts_prime
 
     @staticmethod
     def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8):
@@ -1927,14 +1935,19 @@ def run_corrective_pipeline_on_sphere(
         pts_sph[..., 2] = depth_corrected
         if verbose:
             print("a. Metric Depth Obtained.")
+    else:
+        depth_corrected = pts_sph[..., 2]
     # 3. Merge back 
     final_pts = sph2carte_3D(pts_sph)
 
     # 4. Correct Walls
     if correct_walls:
-        final_pts = GeometryTransforms.correct_walls_lp(
-            pts_carte=final_pts,
-            p=6.0 #correction strenght
+        # final_pts = GeometryTransforms.correct_walls_lp(
+        #     pts_carte=final_pts,
+        #     p=6.0 #correction strenght
+        # )
+        final_pts = GeometryTransforms.correct_walls_v2(
+            pts_carte=final_pts
         )
     
     
@@ -1952,6 +1965,7 @@ def run_corrective_pipeline_on_sphere(
             print(f"Using depth threshold for floor correction (metric): {correct_until_depth_metric:.2f}m")
         else:
             correct_until_depth_metric = depth_threshold_for_floor_correction
+            
         theta = carte2sph_3D(final_pts)[..., 0]
         final_pts = GeometryTransforms.correct_floor_v3(
             pts_carte=final_pts,
@@ -1968,11 +1982,10 @@ def run_corrective_pipeline_on_sphere(
 
     # 6. remove sky points
     if remove_sky:
-        assert indoor_or_outdoor == 'outdoor', "Sky removal can only be done for outdoor scenes."
         sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
-        final_pts[sky_mask] = np.array([np.nan, np.nan, np.nan])
+        final_pts = final_pts[~sky_mask] 
+        colors = colors[~sky_mask]
         #TODO: plot a figure showing the sky mask as an overlay over the image.
-        raise NotImplementedError("Sky removal is deperecitated rn")
 
         if verbose:
             print("d. (Optional) Sky Removed.")
@@ -2057,6 +2070,9 @@ def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
 # --------------------------------------------#
 # ----   World Opening transformations -----  #
 # --------------------------------------------#
+#TODO: remove the functions: 
+# get_sphere_tangent, unfold_points_on_walls
+
 
 def get_sphere_tangent(phi0, sph_points):
         """
@@ -2325,7 +2341,7 @@ def filter_points_by_plane_sph(pts_sph, forward_sph, cut_distance):
 
 def filter_points_by_plane_cartesian(pts_carte, forward_carte, cut_distance):
     """
-    Remove points that lie *behind* the plane orthogonal to `forward_carte`
+    Remove points that lie *beyond* the plane orthogonal to `forward_carte`
     and located at a distance `cut_distance` along that direction.
 
     Parameters
@@ -2414,67 +2430,6 @@ def compute_cut_distance_based_on_percentile(pts_sph=None, pts_carte=None, forwa
     cut_distance = np.percentile(proj, percentile)
     return cut_distance
 
-def open_world_sph(forward_sph, pts_sph, opening_mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
-    assert opening_mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
-    if opening_mode == 'wall':
-        pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
-        mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
-    elif opening_mode == 'cut+wall':
-        pts_opened = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'cut+cylinder':
-        pts_opened = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'remove_within_cone':
-        pts_opened = pts_sph
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'straight_cut':
-        if cut_distance is None:
-            cut_distance = compute_cut_distance_based_on_percentile(
-                pts_sph, forward_sph, percentile=cut_distance_percentile
-            )
-        pts_opened = pts_sph
-        _, mask_keep = filter_points_by_plane_sph(pts_sph, forward_sph, cut_distance=cut_distance)
-
-    return pts_opened[mask_keep], pts_opened, mask_keep
-
-def open_world_carte(forward_carte, pts_carte, opening_mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
-    assert opening_mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
-
-    if opening_mode == 'wall':
-        pts_sph = carte2sph_3D(pts_carte)
-        forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
-        pts_opened = sph2carte_3D(pts_opened_sph)
-        mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
-    elif opening_mode == 'cut+wall':
-        pts_sph = carte2sph_3D(pts_carte)
-        forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
-        pts_opened = sph2carte_3D(pts_opened_sph)
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'cut+cylinder':
-        pts_sph = carte2sph_3D(pts_carte)
-        forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
-        pts_opened = sph2carte_3D(pts_opened_sph)
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'remove_within_cone':
-        pts_sph = carte2sph_3D(pts_carte)
-        forward_sph = carte2sph_3D(forward_carte)
-        pts_opened = pts_sph
-        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
-    elif opening_mode == 'straight_cut':
-        pts_opened = pts_carte
-        kept_pts_carte, pts_carte, mask_keep, cut_distance = straight_cut(
-            forward_carte=forward_carte,
-            pts_carte=pts_carte,
-            cut_distance=cut_distance,
-            cut_distance_percentile=cut_distance_percentile
-        )
-
-    return pts_opened[mask_keep], pts_opened, mask_keep
-
 def straight_cut(forward_carte, pts_carte, cut_distance=None, cut_distance_percentile=90):
     """
     Open the world by cutting points behind a plane orthogonal to `forward_carte`.
@@ -2511,6 +2466,579 @@ def straight_cut(forward_carte, pts_carte, cut_distance=None, cut_distance_perce
         cut_distance=cut_distance
     )
     return kept_pts_carte, pts_carte, mask_keep, cut_distance
+
+def build_disk_to_square_displacement_fn(
+    center=(0.0, 0.0),
+    radius=1.0,
+    num_points=700000,
+    threshold=0.8,
+    forward=np.array([1.0, 0.0]),
+    n_arc_points=200,
+    n_line_points=50,
+    delta=np.pi,
+    plot=False,
+    max_arrows=1000,
+):
+    """
+    Build a harmonic displacement function for a cut disk setup and
+    generate diagnostic plots.
+
+    Parameters
+    ----------
+    center : (2,) tuple or array-like
+        Center of the disk.
+    radius : float
+        Radius of the disk.
+    num_points : int
+        Approximate number of sampling points for the disk.
+    threshold : float
+        Plane threshold distance (relative to center) along `forward`.
+    forward : (2,) array-like
+        Normal to the cutting plane.
+    n_arc_points : int
+        Number of points to sample on the circular arc of the boundary.
+    n_line_points : int
+        Number of points to sample on the straight chord of the boundary.
+    delta : float
+        Angular opening used in the unfolding step.
+    closed : str
+        Interval closure for arc splitting ('both', 'left', 'right', 'neither').
+    max_arrows : int
+        Max number of arrows for quiver debug plots.
+
+    Returns
+    -------
+    displacement_fn : callable
+        A function f(P) -> P_def that applies the learned deformation
+        to any (N, 2) array of points.
+    """
+    closed='neither'
+
+
+    def get_points_on_disk(center, radius, num_points):
+        """
+        Generate approximately `num_points` grid-spaced points inside a disk.
+
+        Parameters
+        ----------
+        center : (2,) array-like
+            Center of the disk (x, y).
+        radius : float
+            Disk radius.
+        num_points : int
+            Approximate number of points desired.
+
+        Returns
+        -------
+        points : (M, 2) ndarray
+            Grid points inside the disk, M ≈ num_points.
+        """
+        cx, cy = center
+        area = np.pi * radius * radius
+        spacing = np.sqrt(area / num_points)
+
+        gx = np.arange(cx - radius, cx + radius + spacing, spacing)
+        gy = np.arange(cy - radius, cy + radius + spacing, spacing)
+        xx, yy = np.meshgrid(gx, gy)
+        pts = np.column_stack([xx.ravel(), yy.ravel()])
+
+        d2 = (pts[:, 0] - cx)**2 + (pts[:, 1] - cy)**2
+        inside = d2 <= radius**2
+        return pts[inside]
+
+    def get_dummy_points(center, radius, forward, num_points, threshold):
+        """
+        Convenience function:
+        - Generate points on a disk
+        - Remove points beyond a plane with normal `forward`
+        at distance `threshold` from `center` along that normal.
+
+        Parameters
+        ----------
+        center : (2,) array-like
+            Center of the disk.
+        radius : float
+            Radius of the disk.
+        forward : (2,) array-like
+            Normal to the cutting plane.
+        num_points : int
+            Approximate number of grid points inside the disk.
+        threshold : float
+            Distance along `forward` from `center` where the cut occurs.
+
+        Returns
+        -------
+        points : (M, 2) ndarray
+            Filtered points inside the disk and on the kept side of the plane.
+        """
+        pts = get_points_on_disk(center, radius, num_points)
+        pts_filtered, mask = filter_points_by_plane_cartesian(pts - center, forward, threshold)
+        return pts_filtered
+
+    def get_line(p_start, p_end, n_points):
+        """
+        Return n_points evenly spaced along the straight line segment
+        from p_start to p_end (inclusive).
+        """
+        p_start = np.asarray(p_start, dtype=float)
+        p_end   = np.asarray(p_end, dtype=float)
+
+        t = np.linspace(0.0, 1.0, n_points)
+        return (1 - t)[:, None] * p_start[None, :] + t[:, None] * p_end[None, :]
+
+    def get_cut_disk_boundary(center, radius, forward, threshold,
+                            n_arc_points=200, n_line_points=50):
+        """
+        Get the boundary of a disk cut by the half-space <p, n> <= threshold,
+        where n is the normalized `forward` vector.
+
+        The boundary is:
+        - A circular arc of the disk
+        - Plus a straight chord segment on the cutting line
+            <p, n> = threshold, between the two intersection points
+            with the circle.
+
+        Parameters
+        ----------
+        center : (2,) array-like
+            Center of the disk (cx, cy).
+        radius : float
+            Radius of the disk.
+        forward : (2,) array-like
+            Normal to the cutting line (direction of "beyond").
+            Does not need to be normalized.
+        threshold : float
+            Threshold value along the normalized `forward` direction.
+            The cutting line is { p | <p, n> = threshold }.
+        n_arc_points : int
+            Number of sample points along the circular arc part.
+        n_line_points : int
+            Number of sample points along the straight chord segment.
+
+        Returns
+        -------
+        arc_points : (Na, 2) ndarray
+            Points sampled along the circular arc of the kept region.
+        line_points : (Nl, 2) ndarray
+            Points sampled along the chord segment on the cutting line.
+            If there is no cut or no intersection, may be empty.
+
+        Notes
+        -----
+        - If the plane is entirely outside the disk on the "beyond" side,
+        you get the full circle and an empty line (no chord).
+        - If the plane is entirely inside the disk on the opposite side
+        (disk completely beyond), both outputs are empty.
+        """
+        center = np.asarray(center, dtype=float)
+        cx, cy = center
+        r = float(radius)
+
+        forward = np.asarray(forward, dtype=float)
+        n = forward / np.linalg.norm(forward)  # normalized normal
+
+        # Signed distance of center along n
+        d_center = np.dot(center, n)
+
+        # Equation on the unit circle direction u(θ):
+        #   <c + r u(θ), n> = threshold  =>  <u(θ), n> = (threshold - <c,n>) / r
+        s = (threshold - d_center) / r  # must be in [-1, 1] to intersect
+
+        # Case 1: plane is outside on the "beyond" side => full circle kept, no chord
+        if s >= 1.0:
+            theta = np.linspace(0.0, 2.0 * np.pi, n_arc_points, endpoint=True)
+            x = cx + r * np.cos(theta)
+            y = cy + r * np.sin(theta)
+            arc_points = np.column_stack((x, y))
+            line_points = np.zeros((0, 2))
+            return arc_points, line_points
+
+        # Case 2: plane is so far inside that disk is entirely beyond => nothing kept
+        if s <= -1.0:
+            return np.zeros((0, 2)), np.zeros((0, 2))
+
+        # Genuine cut
+        # Let n = (cos ψ, sin ψ). Then <u(θ), n> = cos(θ - ψ).
+        # We need cos(θ - ψ) = s => θ - ψ = ±α, α = arccos(s).
+        # Region kept is where <p, n> <= threshold => cos(θ - ψ) <= s,
+        # which corresponds to (θ - ψ) ∈ [α, 2π - α].
+        psi = np.arctan2(n[1], n[0])
+        alpha = np.arccos(s)
+
+        theta_arc = psi + np.linspace(alpha, 2.0 * np.pi - alpha, n_arc_points, endpoint=True)
+        x_arc = cx + r * np.cos(theta_arc)
+        y_arc = cy + r * np.sin(theta_arc)
+        arc_points = np.column_stack((x_arc, y_arc))
+
+        # Intersection points at θ1 = ψ + α, θ2 = ψ - α (≡ ψ + 2π - α)
+        theta1 = psi + alpha
+        theta2 = psi - alpha  # equivalent to psi + 2π - alpha modulo 2π
+
+        p1 = center + r * np.array([np.cos(theta1), np.sin(theta1)])
+        p2 = center + r * np.array([np.cos(theta2), np.sin(theta2)])
+
+        line_points = get_line(p1, p2, n_line_points)
+        return arc_points, line_points
+
+    def carte2polar_xy(x, y):
+        r = np.sqrt(x**2 + y**2)
+        phi = np.arctan2(y, x)
+        return phi % (2*np.pi), r
+
+    def carte2polar_2D(points):
+        x = points[:, 0]
+        y = points[:, 1]
+        return carte2polar_xy(x, y)
+
+    def circle_point(phi, r=1.0):
+        x = r * np.cos(phi)
+        y = r * np.sin(phi)
+        return np.stack([x, y], axis=-1)
+
+    def circle_tangent_dir(phi0, r=1.0):
+        dx = -r * np.sin(phi0)
+        dy =  r * np.cos(phi0)
+        return np.array([dx, dy])
+
+    def project_on_tangent(phi0, phi, r=1.0):
+        phi  = np.asarray(phi)
+        base = circle_point(np.array([phi0]), r=r)[0]
+        direction = circle_tangent_dir(phi0, r=r)
+        delta = angle_diff(phi, phi0)
+        return base[None, :] + delta[:, None] * direction[None, :]
+
+    def compute_forward_angles(forward, delta=np.pi):
+        """
+        Given a forward direction and an opening angle delta,
+        compute phi1, phi2 and phi_forward.
+        """
+        forward = np.asarray(forward, dtype=float)
+        forward /= np.linalg.norm(forward)
+        phi_forward, _ = carte2polar_xy(forward[0], forward[1])
+        phi_forward = normalize_angle(phi_forward)
+
+        phi1 = normalize_angle(phi_forward + delta/2.0)
+        phi2 = normalize_angle(phi_forward - delta/2.0)
+        return phi1, phi2, phi_forward
+
+    def unfold_circle_from_cartesian(points, phi1, phi2, forward, closed='neither'):
+        """
+        Given cartesian points on a circle, split them into two arcs and 'other'
+        using forward, phi1, phi2, and project the two arcs onto the tangents.
+        """
+        points = np.asarray(points)
+        assert points.ndim == 2 and points.shape[1] == 2, "points must be (N, 2)"
+
+        forward = np.asarray(forward, dtype=float)
+        forward /= np.linalg.norm(forward)
+        phi_forward, _ = carte2polar_xy(forward[0], forward[1])
+        phi_forward = normalize_angle(phi_forward)
+
+        phi1 = normalize_angle(phi1)
+        phi2 = normalize_angle(phi2)
+
+        phis, radii = carte2polar_2D(points)
+        r = radii.mean()
+
+        arc1_bounds = (phi_forward, phi1)
+        arc2_bounds = (phi2, phi_forward)
+
+        mask_arc1 = in_interval_mod(phis, arc1_bounds[0], arc1_bounds[1], closed=closed)
+        mask_arc2 = in_interval_mod(phis, arc2_bounds[0], arc2_bounds[1], closed=closed)
+        mask_other = ~(mask_arc1 | mask_arc2)
+
+        arc1_points = points[mask_arc1]
+        arc2_points = points[mask_arc2]
+        other_points = points[mask_other]
+
+        phis_arc1 = phis[mask_arc1]
+        phis_arc2 = phis[mask_arc2]
+
+        arc1_proj = project_on_tangent(phi1, phis_arc1, r=r)
+        arc2_proj = project_on_tangent(phi2, phis_arc2, r=r)
+
+        return {
+            "arc1": arc1_points,
+            "arc2": arc2_points,
+            "other": other_points,
+            "arc1_proj": arc1_proj,
+            "arc2_proj": arc2_proj,
+            "phi_forward": phi_forward,
+            "radius": r,
+            "mask_arc1": mask_arc1,
+            "mask_arc2": mask_arc2,
+            "mask_other": mask_other,
+        }
+
+    def build_cut_disk_unfolded(center,
+                                radius,
+                                threshold,
+                                forward=np.array([1.0, 0.0]),
+                                delta=np.pi,
+                                n_arc_points=200,
+                                n_line_points=50,
+                                closed='neither'):
+        """
+        Full pipeline wrapper.
+
+        Steps:
+        - Build cut disk boundary (arc_points, line_points)
+        - Split arc_points into arc1, arc2, other in angle-space
+        - Project arc1, arc2 onto tangents at phi1, phi2
+        - Find extremes of the straight boundary and project them
+        - Build a straight line between those extremes in both spaces
+
+        Returns
+        -------
+        circle_concat : (K, 2) ndarray
+            Concatenation of (arc1, arc2, line_points)
+
+        proj_concat : (K, 2) ndarray
+            Concatenation of (arc1_proj, arc2_proj, line_points_proj)
+        """
+        # 1) cut disk boundary
+        arc_points, line_points = get_cut_disk_boundary(
+            center, radius, forward, threshold,
+            n_arc_points=n_arc_points,
+            n_line_points=n_line_points
+        )
+
+        if arc_points.shape[0] == 0 or line_points.shape[0] == 0:
+            # Degenerate cases: nothing interesting to unfold
+            return np.zeros((0, 2)), np.zeros((0, 2))
+
+        # 2) angles for unfolding
+        phi1, phi2, _ = compute_forward_angles(forward, delta=delta)
+
+        # 3) unfold only the arc part
+        data = unfold_circle_from_cartesian(arc_points, phi1, phi2, forward, closed=closed)
+
+        # 4) extremes of the boundary line (two intersection points)
+        extreme_points = np.vstack([line_points[0], line_points[-1]])
+        data_extremes = unfold_circle_from_cartesian(extreme_points, phi1, phi2, forward, closed=closed)
+
+        # 5) line in projected (tangent) space between projected extremes
+        p_start_proj = data_extremes["arc1_proj"][0]
+        p_end_proj   = data_extremes["arc2_proj"][0]
+        line_points_proj = get_line(p_start_proj, p_end_proj, n_line_points)
+
+        # 6) concatenations requested
+        circle_concat = np.vstack([data["arc1"], data["arc2"], line_points])
+        proj_concat   = np.vstack([data["arc1_proj"], data["arc2_proj"], line_points_proj])
+
+        return circle_concat, proj_concat
+
+    def plot_quiver_mapping(circle_concat, proj_concat, max_arrows=100):
+        """
+        Plot a quiver field mapping each point in circle_concat to its
+        corresponding point in proj_concat, using a subset to avoid clutter.
+
+        Parameters
+        ----------
+        circle_concat : (N, 2) ndarray
+            Source points (e.g. on the circle / cut boundary).
+        proj_concat : (N, 2) ndarray
+            Target points (e.g. projected onto tangents / line).
+            Must have one-to-one correspondence with circle_concat.
+        max_arrows : int
+            Maximum number of arrows to draw (subsampled uniformly).
+        """
+        circle_concat = np.asarray(circle_concat, dtype=float)
+        proj_concat   = np.asarray(proj_concat, dtype=float)
+
+        assert circle_concat.shape == proj_concat.shape, \
+            "circle_concat and proj_concat must have the same shape"
+        assert circle_concat.ndim == 2 and circle_concat.shape[1] == 2, \
+            "Inputs must be of shape (N, 2)"
+
+        N = circle_concat.shape[0]
+        if N == 0:
+            print("No points to plot.")
+            return
+
+        # Uniform subsampling
+        if N > max_arrows:
+            step = int(np.ceil(N / max_arrows))
+            idx = np.arange(0, N, step)
+        else:
+            idx = np.arange(N)
+
+        P = circle_concat[idx]       # tails
+        Q = proj_concat[idx]         # heads
+        U = Q[:, 0] - P[:, 0]        # dx
+        V = Q[:, 1] - P[:, 1]        # dy
+
+
+        # Quiver for the subsampled pairs
+        plt.quiver(P[:, 0], P[:, 1], U, V,
+                angles='xy', scale_units='xy', scale=1,
+                width=0.003, alpha=0.9, color='tab:red',
+                label="mapping")
+
+
+    center = np.asarray(center, dtype=float)
+    forward = np.asarray(forward, dtype=float)
+
+    # ---------------------------------------------------------------
+    # 1. Sample points inside the cut disk
+    # ---------------------------------------------------------------
+    pts = get_dummy_points(center, radius, forward, num_points, threshold)
+
+    # ---------------------------------------------------------------
+    # 2. Build boundary & target boundary (unfolded)
+    # ---------------------------------------------------------------
+    boundary, target_boundary = build_cut_disk_unfolded(
+        center=center,
+        radius=radius,
+        threshold=threshold,
+        forward=forward,
+        delta=delta,
+        n_arc_points=n_arc_points,
+        n_line_points=n_line_points,
+        closed=closed,
+    )
+
+    # ---------------------------------------------------------------
+    # 3. Prepare constraints for harmonic_deform_pipeline
+    # ---------------------------------------------------------------
+    pts_with_boundary = np.vstack([pts, boundary])
+
+    boundary_mask = np.concatenate([
+        np.zeros(len(pts), dtype=bool),      # pts → not boundary
+        np.ones(len(boundary), dtype=bool)   # boundary → boundary
+    ])
+
+    # Fixed region: everything "behind" plane through center (< p-center, n > <= 0)
+    _, fixed_mask = filter_points_by_plane_cartesian(
+        pts_with_boundary - center,
+        forward_carte=forward,
+        cut_distance=0.0
+    )
+
+    # ---------------------------------------------------------------
+    # 4. Run harmonic deformation to get displacement function
+    # ---------------------------------------------------------------
+    _, _, displacement_fn = harmonic_deform_pipeline(
+        P=pts_with_boundary,
+        mask_fixed=fixed_mask,
+        mask_boundary=boundary_mask,
+        target_boundary=target_boundary,
+        return_displacement_fn=True,
+    )
+
+    if plot:
+
+        # ---------------------------------------------------------------
+        # 6. Debug plot : deformation of a global grid
+        # ---------------------------------------------------------------
+        grid_x, grid_y = np.meshgrid(
+            np.linspace(-1.5, 1.5, 100),
+            np.linspace(-1.5, 1.5, 100)
+        )
+        grid_points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+        np.random.shuffle(grid_points)  # randomize for better quiver subsampling
+
+        grid_points_def = displacement_fn(grid_points)
+
+        plt.figure(figsize=(8, 8))
+        plt.scatter(
+            grid_points[:, 0], grid_points[:, 1],
+            s=1, alpha=0.3, label="grid points"
+        )
+        plt.scatter(
+            grid_points_def[:, 0], grid_points_def[:, 1],
+            s=1, alpha=0.3, label="deformed grid points"
+        )
+        plt.scatter(
+            boundary[:, 0], boundary[:, 1],
+            s=10, c='red', label="boundary"
+        )
+        plt.scatter(
+            target_boundary[:, 0], target_boundary[:, 1],
+            s=10, c='blue', label="target boundary"
+        )
+
+        plot_quiver_mapping(
+            grid_points,
+            grid_points_def,
+            max_arrows=max_arrows
+        )
+
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.grid()
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.xlim(-2.5, 2.5)
+        plt.ylim(-2.5, 2.5)
+        plt.legend()
+        plt.title("Harmonic deformation on global grid")
+        plt.show()
+
+    # ---------------------------------------------------------------
+    # 7. Return the displacement function
+    # ---------------------------------------------------------------
+    return displacement_fn
+
+def open_world_carte(forward_carte, pts_carte, opening_mode='cut+cylinder', delta_cut=np.pi/2, cut_distance=None, cut_distance_percentile=90):
+    assert opening_mode in ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut', 'straight_cut+disk_to_square_displacement']
+
+    if opening_mode == 'wall':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
+    elif opening_mode == 'cut+wall':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'cut+cylinder':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened_sph = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
+        pts_opened = sph2carte_3D(pts_opened_sph)
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'remove_within_cone':
+        pts_sph = carte2sph_3D(pts_carte)
+        forward_sph = carte2sph_3D(forward_carte)
+        pts_opened = pts_sph
+        _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
+    elif opening_mode == 'straight_cut':
+        pts_opened = pts_carte
+        kept_pts_carte, pts_carte, mask_keep, cut_distance = straight_cut(
+            forward_carte=forward_carte,
+            pts_carte=pts_carte,
+            cut_distance=cut_distance,
+            cut_distance_percentile=cut_distance_percentile
+        )
+    elif opening_mode == 'straight_cut+disk_to_square_displacement':
+        if cut_distance is None:
+            cut_distance = compute_cut_distance_based_on_percentile(
+                pts_carte=pts_carte,
+                forward_carte=forward_carte,
+                percentile=cut_distance_percentile
+            )
+        kept_pts_carte, pts_carte, mask_keep, cut_distance = straight_cut(
+            forward_carte=forward_carte,
+            pts_carte=pts_carte,
+            cut_distance=cut_distance,
+        )
+        # TODO: optimize performance here doing this init only once
+        displacement_fn = build_disk_to_square_displacement_fn(
+            center=(0.0, 0.0),
+            radius=1.0,
+            threshold=cut_distance,
+            forward=forward_carte[:2],
+            plot=False
+        )
+        pts_xy = pts_carte[:, :2]
+        pts_z  = pts_carte[:, 2:3]
+        pts_xy_def = displacement_fn(pts_xy)
+        pts_opened = np.hstack([pts_xy_def, pts_z])
+
+    return pts_opened[mask_keep], pts_opened, mask_keep
 
 
 # ------------------------------------------- #
@@ -2563,14 +3091,14 @@ def kmeans_downsample(P, n_samples, seed=0):
 
 # 4. Hard Dirichlet solver
 def harmonic_deform_dirichlet(P, idx_fixed, idx_boundary, target_boundary, k=10, solver='cg'):
-    N = P.shape[0]
+    N, D = P.shape
     B = np.unique(np.concatenate([idx_fixed, idx_boundary]))
     M = np.setdiff1d(np.arange(N), B, assume_unique=False)
 
     L = build_graph_laplacian(P, k=k)
 
     # Displacements on boundary
-    uB = np.zeros((len(B), 3))
+    uB = np.zeros((len(B), D))
     if len(idx_boundary) > 0:
         pos_in_B = {b:i for i,b in enumerate(B)}
         jj = np.array([pos_in_B[i] for i in idx_boundary], dtype=int)
@@ -2582,7 +3110,7 @@ def harmonic_deform_dirichlet(P, idx_fixed, idx_boundary, target_boundary, k=10,
 
     U = np.zeros_like(P)
     if solver == 'cg':
-        for d in range(3):
+        for d in range(D):
             uM, info = cg(L_MM, rhs[:,d], atol=0, rtol=1e-6, maxiter=2000)
             if info != 0:
                 lu = splu(L_MM.tocsc())
@@ -2608,7 +3136,7 @@ def prolongate_displacements(P_full, P_coarse, U_coarse, m=3, power=2):
 # 6. Pipeline (mask-based)
 def harmonic_deform_pipeline(P, mask_fixed, mask_boundary, target_boundary,
                              n_coarse=10000, every=5, max_fixed=5000,
-                             k=10, m=3, power=2, seed=0):
+                             k=10, m=3, power=2, seed=0, return_displacement_fn=False):
     """
     - Subsample constraints
     - Build coarse set of mobile points with k-means
@@ -2640,8 +3168,14 @@ def harmonic_deform_pipeline(P, mask_fixed, mask_boundary, target_boundary,
     U_coarse = P_coarse_def - P_coarse
 
     # Prolongation to full set
-    U_full = prolongate_displacements(P, P_coarse, U_coarse, m=m, power=power)
-    P_def = P + U_full
+    def displacement_fn(P_input):
+        U_full = prolongate_displacements(P_input, P_coarse, U_coarse, m=m, power=power)
+        P_def = P_input + U_full
+        return P_def
+    
+    P_def = displacement_fn(P)
+    if return_displacement_fn:
+        return P_def, coarse_idx, displacement_fn
     return P_def, coarse_idx
 
 
@@ -2771,6 +3305,9 @@ if __name__ == "__main__":
         ax.set_xlim3d([xmid - radius, xmid + radius])
         ax.set_ylim3d([ymid - radius, ymid + radius])
         ax.set_zlim3d([zmid - radius, zmid + radius])
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
 
 
     pts_xyz = (np.random.rand(5000, 3)-0.5) * 10.0  # random 3D points
@@ -2811,8 +3348,21 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+    # test build_disk_to_square_displacement_fn
+    test_displancement_fn=True
+    if test_displancement_fn:
+        displacement_fn = build_disk_to_square_displacement_fn(
+            center=(0.0, 0.0),
+            radius=1.0,
+            num_points=700000,
+            threshold=0.8,
+            forward=np.array([1.0, -1.0]),
+            n_arc_points=200,
+            n_line_points=50,
+            plot=True,
+        )
 
-    test_old=False
+    test_old=True
     if test_old:
         # --- existing setup (your code above this) ---
         perturn_scale = 0.0
@@ -2830,7 +3380,7 @@ if __name__ == "__main__":
 
 
         # --- plotting section fix ---
-        methods = ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut']
+        methods = ['wall', 'cut+wall', 'cut+cylinder', 'remove_within_cone', 'straight_cut', 'straight_cut+disk_to_square_displacement']
 
         # +1 row for the original point cloud
         n_rows = 1 + 1  # first row = original, second row = all methods
@@ -2854,12 +3404,28 @@ if __name__ == "__main__":
 
         # --- Row 1: Transformed by each method ---
         for jj, mode in enumerate(methods):
-            pts_opened_sph, _, _ = open_world_sph(forward_sph, pts_sph, mode=mode, delta_cut=2*np.pi/3)
+            forward_carte = sph2carte_3D(forward_sph)
+            pts_carte = sph2carte_3D(pts_sph)
+            pts_opened_xyz, _, _ = open_world_carte(forward_carte, pts_carte, opening_mode=mode, delta_cut=2*np.pi/3)
             ax = axes[1, jj]
-            pts_opened_xyz = sph2carte_3D(pts_opened_sph)
-            ax.scatter(*pts_opened_xyz.T, s=1, c=xyz_to_rgb(pts_opened_sph, coord_type='spherical'))
+       
+            ax.scatter(*pts_opened_xyz.T, s=1, c=xyz_to_rgb(pts_opened_xyz, coord_type='cartesian'))
             ax.set_title(f"Open world ({mode})")
             set_equal_aspect_3d(ax)
 
         plt.tight_layout()
         plt.show()
+
+
+        # open3d visualization of pts_opened_xyz
+        try:
+            import open3d as o3d
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pts_opened_xyz)
+            colors = xyz_to_rgb(pts_opened_xyz, coord_type='cartesian')
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+
+            o3d.visualization.draw_geometries([pcd], window_name="Opened Point Cloud")
+        except ImportError:
+            print("Open3D is not installed. Skipping Open3D visualization.")    
