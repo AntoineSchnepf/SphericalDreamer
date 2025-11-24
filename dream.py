@@ -492,6 +492,7 @@ if __name__ == "__main__":
     FAR=1.0
     NEAR=0.01
     delta_walk =  FAR * np.pi / 2
+    raise_intermediate_camera_by_z = 0.3    
     override_with_inpaint=False
     if depth_model == 'egformer':
         width = 1024
@@ -503,15 +504,15 @@ if __name__ == "__main__":
         "A realistic illustration of a college campus. In the middle ground, several academic buildings with brick facades and large windows stand prominently. In the background, a bright blue sky with scattered clouds stretches across the scene. In the foreground, a few elements commonly found on campus, such as students walking, bicycles parked along a path, and a grassy lawn with trees, add depth and life to the scene.",
         "A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.",
         "A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.",
-        "A bustling city street at night, neon lights reflecting on wet pavement, realism style.",
+        "A bustling city street at night, neon lights reflecting on wet pavement, realism style. Buildings are seen from a distance, with cars and pedestrians adding life to the scene.",
         # "Sandy beach, large driftwood in the foreground, calm sea beyond, realism style.",
         # "A wide field under daylight, covered in lush green grass with worn paths where the grass has been trampled by many footsteps. In the center of the field stands a large concert stage, decorated with bold triangular patterns. On the stage rests a single guitar, but no performers are present. In front of the stage, a lively crowd gathers, waiting for the show to begin."
     ]
     expnames=[
-        "27_campus",
-        "27_seaside",
-        "27_forest",
-        "27_city",
+        "29_campus",
+        "29_seaside",
+        "29_forest",
+        "29_city",
     ]
     indoor_or_outdoor_list = [
         'outdoor',
@@ -581,21 +582,27 @@ if __name__ == "__main__":
         dream=0,
         save_dir_=save_dir_
     )
-    pts1_carte_corrected, colors1_corrected = my_utils.GeometryTransforms.run_corrective_pipeline(
-        colors=colors1,
+    pts1_carte = my_utils.depth2cam_carte(
         depth=depth1,
         sphere_radius=sphere_radius,
         height=height,
         width=width,
-        correct_depth=False,
-        near=NEAR,
-        far=FAR,
-        correct_floor=False,
-        correct_walls=False,
-        remove_sky=False,
-        indoor_or_outdoor=None,
-        remove_outliers=True,
-        verbose=True
+    ) 
+    pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
+        pts1_carte, # in cartesian coordinates
+        colors1, 
+        height, width, 
+        correct_depth=False, 
+        near=NEAR, 
+        far=FAR, 
+        correct_walls=True, 
+        correct_floor=True, 
+        depth_threshold_for_floor_correction=0.6, 
+        remove_sky=False, 
+        indoor_or_outdoor=None, 
+        remove_outliers=True, 
+        verbose=False,
+        plot=True,
     )
     sphere1 = my_utils.Sphere(
         pose1, pts1_carte_corrected, colors1_corrected, 
@@ -613,21 +620,27 @@ if __name__ == "__main__":
             dream=i,
             save_dir_=save_dir_
         )
-        pts2_carte_corrected, colors2_corrected = my_utils.GeometryTransforms.run_corrective_pipeline(
-            colors=colors2,
+        pts2_carte = my_utils.depth2cam_carte(
             depth=depth2,
             sphere_radius=sphere_radius,
             height=height,
             width=width,
-            correct_depth=False,
-            near=NEAR,
-            far=FAR,
-            correct_floor=False,
-            correct_walls=False,
-            remove_sky=False,
-            indoor_or_outdoor=None,
-            remove_outliers=True,
-            verbose=True
+        ) 
+        pts2_carte_corrected, colors2_corrected = my_utils.run_corrective_pipeline_on_sphere(
+            pts2_carte, # in cartesian coordinates
+            colors2, 
+            height, width, 
+            correct_depth=False, 
+            near=NEAR, 
+            far=FAR, 
+            correct_walls=True, 
+            correct_floor=True, 
+            depth_threshold_for_floor_correction=0.6, 
+            remove_sky=False, 
+            indoor_or_outdoor=None, 
+            remove_outliers=True, 
+            verbose=False,
+            plot=True,
         )
         
         sphere2 = my_utils.Sphere(
@@ -647,7 +660,7 @@ if __name__ == "__main__":
         pose_intermediate_bis = my_utils.camera_translation(pose1, delta_walk/2 * translation_direction)
         
         assert np.allclose(pose_intermediate, pose_intermediate_bis), "Error in camera intermediate pose computation"
-
+        pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, raise_intermediate_camera_by_z]))
         # 5. Render points from sphere2 (opened right) + sphere2 (opened left), from the intermediate camera
         warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_v2(
             all_pts_world=np.concatenate((

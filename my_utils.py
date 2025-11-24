@@ -23,6 +23,7 @@ from scipy.interpolate import RegularGridInterpolator
 # ------ Classic Computer Vision utils ------- #
 # -------------------------------------------- #
 
+
 def fill_mask(mask, flip=False):
     # mask: boolean NumPy array
     # Fill holes in False regions completely surrounded by True, by swapping True to False in such areas
@@ -1778,7 +1779,7 @@ class GeometryTransforms:
         r_c_corr = r_c.copy()
         z_corr = z.copy()
 
-        theta = np.atan2(z, r_c)
+        theta = np.arctan2(z, r_c)
         r = np.sqrt(r_c**2 + z**2)
         cos_t = np.cos(theta)
         sin_t = np.sin(theta)
