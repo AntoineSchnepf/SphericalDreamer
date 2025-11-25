@@ -639,41 +639,6 @@ def cyl2cart_zaxis(cyl):
 
     return np.stack((X, Y, Z), axis=-1)
 
-# def cam_erp2cam_sph_3D(points_2D_cam_erp, height, width, depth, sphere_radius=1.0):
-#     """
-#     Convert Equirectangular coordinates to camera spherical coordinates.
-    
-#     Args:
-#         points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
-#         depth (np.array): Depth map of shape [...].
-#         sphere_radius (float): Radius of the sphere.
-    
-#     Returns:
-#        points_3D_cam_sph: np.array w. shape [..., 3]. Camera spherical coordinates. Convention theta, phi, r.
-#     """
-#     assert np.all(points_2D_cam_erp.shape[:-1] == depth.shape)
-#     points_2D_cam_sph = erp2sph_2D(points_2D_cam_erp, erp_image_height=height, erp_image_width=width)
-#     r = depth * sphere_radius
-#     points_3D_cam_sph = np.concatenate((points_2D_cam_sph, np.expand_dims(r, axis=-1)), axis=-1)
-#     return points_3D_cam_sph
-
-# def cam_erp2world_3D(points_2D_cam_erp, height, width, depth, pose, sphere_radius=1.0):
-#     """
-#     Convert Equirectangular coordinates to world coordinates.
-    
-#     Args:
-#         points_2D_cam_erp (np.array): Equirectangular coordinates of shape [..., 2].
-#         depth (np.array): Depth map of shape [...].
-#         pose (np.array): Camera pose matrix of shape [4, 4].
-#         sphere_radius (float): Radius of the sphere.
-    
-#     Returns:
-#        points_3D_world_carte: np.array w. shape [..., 3]. World coordinates. Convention X, Y, Z.
-#     """
-#     points_3D_cam_sph = cam_erp_to_cam_sph_3D(points_2D_cam_erp, height, width, depth, sphere_radius)
-#     points_3D_world_carte = cam_sph_to_world_3D(points_3D_cam_sph, pose)
-#     return points_3D_world_carte
-
 # ---------------------------------------- #
 # ----- Panorama / Pointcloud utils  ----- #
 # ---------------------------------------- #
@@ -1798,13 +1763,47 @@ class GeometryTransforms:
         return pts1_carte_corrected
 
     @staticmethod
-    def correct_walls_v2(pts_carte):
-        """Unfolds sphere into a cylinder of prinpal axis Z."""
-        pts_sph = carte2sph_3D(pts_carte)
+    def correct_walls_sphere_unfold(pts_carte, sphere_center=np.array([0,0,0])):
+        """
+        Unfolds sphere into a cylinder of prinpal axis Z.
+        pts_carte: np.array[..., 3] in Cartesian coordinates experessed in the local sphere frame.
+        """
+        pts_sph = carte2sph_3D(pts_carte-sphere_center)
         up = np.array([0, 0, 1])
         up_sph = carte2sph_3D(up)
-        pts_prime_sph = unfold_points_on_cylinder(pts_sph, up_sph)
-        pts_prime = sph2carte_3D(pts_prime_sph)
+        pts_prime_sph = unfold_sphere_in_cylinder_uniform(pts_sph, up_sph)
+        pts_prime = sph2carte_3D(pts_prime_sph) + sphere_center
+        return pts_prime
+
+    @staticmethod
+    def correct_walls_cylinder_unfold(pts_carte):
+        """
+        Unfolds the curved walls of a cylinder of principal axis +X into
+        a straight wall (tangent plane) facing +Z.
+
+        Only points whose cylindrical angle around the +X axis
+        satisfies theta ∈ [0, π] are affected.
+
+        pts_carte: np.array[..., 3] in Cartesian coordinates.
+        returns:   np.array[..., 3] in Cartesian coordinates.
+        """
+        pts_carte = np.asarray(pts_carte)
+        if pts_carte.shape[-1] != 3:
+            raise ValueError("pts_carte must have shape [..., 3].")
+
+        # Cartesian -> cylindrical [x, p, theta] around +X
+        pts_cyl = cart2cyl_xaxis(pts_carte)
+
+        # Unfold appropriate walls
+
+        up = np.array([0, 0, 1])
+        up_cyl = cart2cyl_xaxis(up)
+
+        pts_cyl_unfold = unfold_cylinder_on_tangents(pts_cyl, up_cyl, delta=np.pi)
+
+        # Back to Cartesian
+        pts_prime = cyl2cart_xaxis(pts_cyl_unfold)
+
         return pts_prime
 
     @staticmethod
@@ -1946,10 +1945,9 @@ def run_corrective_pipeline_on_sphere(
         #     pts_carte=final_pts,
         #     p=6.0 #correction strenght
         # )
-        final_pts = GeometryTransforms.correct_walls_v2(
+        final_pts = GeometryTransforms.correct_walls_sphere_unfold(
             pts_carte=final_pts
         )
-    
     
     # 5. Correct Floor
     if correct_floor:
@@ -2004,6 +2002,149 @@ def run_corrective_pipeline_on_sphere(
             print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
     
     return final_pts, colors
+
+
+def run_corrective_pipeline_on_world(
+    pts, 
+    colors,
+    pose_left,
+    pose_right,
+    translation_direction,
+    correct_depth, 
+    near, 
+    far, 
+    correct_walls, 
+    correct_floor, 
+    depth_threshold_for_floor_correction, 
+    verbose=False,
+    plot=False,
+):
+    
+    """expects points in cartesian coordinates. Cylinder is assumed to be along the X-axis"""
+
+    # 1. Seprate cylindrical right sphere and left sphere.
+    final_pts = pts.copy()
+    cam_left=pose_left[:3,3]
+    cam_right=pose_right[:3,3]
+    _, mask_keep_left = filter_points_by_plane_cartesian(pts, forward_carte=-translation_direction, cut_distance=np.linalg.norm(cam_left))
+    _, mask_keep_right = filter_points_by_plane_cartesian(pts, forward_carte=translation_direction, cut_distance=np.linalg.norm(cam_right))
+    
+    # in world coordinates
+    pts_left = pts[~mask_keep_left]
+    pts_right = pts[~mask_keep_right]
+    pts_cyl = pts[mask_keep_right & mask_keep_left]
+
+    # in adapated coordinates
+    pts_left = world2cam_sph_3D(pts_left, pose_left)
+    pts_right = world2cam_sph_3D(pts_right, pose_right)
+    pts_cyl = cart2cyl_xaxis(pts_cyl)
+    
+
+    # 2. Metric Depth Correction 
+    if correct_depth:
+        # 2.a for cylindrical points
+        p_r = pts_cyl[..., 1]     # radial distance
+        p_r_corrected = GeometryTransforms.depth_transform(
+            p_r, 
+            method="inv", 
+            n=near, 
+            f=far, 
+            gamma=5,
+            plot=plot
+        ) 
+        pts_cyl[..., 1] = p_r_corrected
+
+        # 2.b. for left sphere points
+        depth_left = pts_left[..., 2]
+        depth_left_corrected = GeometryTransforms.depth_transform(
+            depth_left, 
+            method="inv", 
+            n=near, 
+            f=far, 
+            gamma=5,
+            plot=plot
+        )
+        pts_left[..., 2] = depth_left_corrected
+
+        #2.c. for right sphere points
+        depth_right = pts_right[..., 2]
+        depth_right_corrected = GeometryTransforms.depth_transform(
+            depth_right, 
+            method="inv", 
+            n=near, 
+            f=far, 
+            gamma=5,
+            plot=plot
+        )
+        pts_right[..., 2] = depth_right_corrected
+
+        if verbose:
+            print("a. Depth Corrected.")
+
+    # 3. Merge back left and right sphere points
+    pts_left = cam_sph2world_3D(pts_left, pose_left)
+    pts_right = cam_sph2world_3D(pts_right, pose_right)
+    pts_cyl = cyl2cart_xaxis(pts_cyl)
+
+    final_pts[~mask_keep_left] = pts_left
+    final_pts[~mask_keep_right] = pts_right
+    final_pts[mask_keep_left & mask_keep_right] = pts_cyl
+    
+    # 4. Correct Walls
+    if correct_walls:
+        # final_pts = GeometryTransforms.correct_walls_lp(
+        #     pts_carte=final_pts,
+        #     p=6.0 #correction strenght
+        # )
+        pts_cyl = GeometryTransforms.correct_walls_cylinder_unfold(
+            pts_carte=pts_cyl
+        )
+
+        pts_left = GeometryTransforms.correct_walls_sphere_unfold(
+            pts_carte=pts_left,
+            sphere_center=pose_left[:3,3]
+        )
+        pts_right = GeometryTransforms.correct_walls_sphere_unfold(
+            pts_carte=pts_right,
+            sphere_center=pose_right[:3,3]
+        )
+
+        final_pts[mask_keep_left & mask_keep_right] = pts_cyl
+        final_pts[~mask_keep_left] = pts_left
+        final_pts[~mask_keep_right] = pts_right
+
+
+    
+
+    # 5. Correct Floor
+    if correct_floor:
+        if correct_depth:
+            correct_until_depth_metric = GeometryTransforms.depth_transform(
+                np.array([depth_threshold_for_floor_correction]), 
+                method="inv", 
+                n=near, 
+                f=far, 
+                gamma=5,
+                plot=False
+            )[0]
+        else:
+            correct_until_depth_metric = depth_threshold_for_floor_correction
+
+        theta = carte2sph_3D(final_pts)[..., 0]
+        final_pts = GeometryTransforms.correct_floor_v3(
+            pts_carte=final_pts,
+            theta=theta,
+            colors=colors,
+            correct_until_depth_metric=correct_until_depth_metric,
+            plot_floor_profile=plot,
+        )
+
+        if verbose:
+            print("b. Cylindrical Floor Corrected.")
+
+    return final_pts
+    
+
 
 # ----------------------------- #
 # ----- Utility functions ----- #
@@ -2066,12 +2207,11 @@ def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
         return ge(phi, a) | le(phi, b)
 
 
-
 # --------------------------------------------#
 # ----   World Opening transformations -----  #
 # --------------------------------------------#
 #TODO: remove the functions: 
-# get_sphere_tangent, unfold_points_on_walls
+# get_sphere_tangent, unfold_sphere_on_tangents
 
 
 def get_sphere_tangent(phi0, sph_points):
@@ -2103,7 +2243,7 @@ def get_sphere_tangent(phi0, sph_points):
         #shape: [..., 3] = shape: [1, 3] + shape: [1, 3] * shape: [..., 1]
         return carte2sph_3D(projection)
 
-def unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi):
+def unfold_sphere_on_tangents(pts_sph, forward_sph, delta=np.pi):
     """
     Unfold points in the spherical coordinates, by projecting them onto the sphere tangents
     at the boundary of a cone of angle delta around forward_sph.
@@ -2136,6 +2276,123 @@ def unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi):
     res_sph[other_mask] = other_pts_sph
 
     return res_sph
+
+def get_cylinder_tangent(theta0, cyl_points):
+    """
+    Project cylindrical points (aligned with +X) onto the tangent plane
+    of the cylinder at angular position theta0.
+
+    Args
+    ----
+    theta0 : float
+        Angle in radians where the tangent is computed (around +X).
+    cyl_points : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [x, p, theta] with:
+          - x     : coordinate along +X
+          - p     : radial distance sqrt(Y^2 + Z^2)
+          - theta : atan2(Z, Y), 0 along +Y, π/2 along +Z
+
+    Returns
+    -------
+    proj_cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates [x, p, theta] of projected points.
+    """
+    cyl_points = np.asarray(cyl_points)
+    if cyl_points.shape[-1] != 3:
+        raise ValueError("cyl_points must have shape [..., 3].")
+
+    x   = cyl_points[..., 0]
+    p   = cyl_points[..., 1]
+    th  = cyl_points[..., 2]
+
+    # Original Cartesian coordinates
+    X = x
+    Y = p * np.cos(th)
+    Z = p * np.sin(th)
+
+    # Base point on the cylinder at theta0, same x and p
+    X0 = X
+    Y0 = p * np.cos(theta0)
+    Z0 = p * np.sin(theta0)
+    P0 = np.stack([X0, Y0, Z0], axis=-1)       # (..., 3)
+
+    # Tangent direction wrt theta at theta0
+    dX_dtheta0 = 0.0 * X
+    dY_dtheta0 = -p * np.sin(theta0)
+    dZ_dtheta0 =  p * np.cos(theta0)
+    dP0 = np.stack([dX_dtheta0, dY_dtheta0, dZ_dtheta0], axis=-1)  # (..., 3)
+
+    # Angular difference to theta0
+    delta = angle_diff(th, theta0)             # (...,)
+
+    # Projection on tangent plane at theta0
+    projection = P0 + dP0 * delta[..., None]   # (..., 3)
+
+    # Back to cylindrical [x, p, theta]
+    proj_cyl = cart2cyl_xaxis(projection)
+    return proj_cyl
+
+def unfold_cylinder_on_tangents(pts_cyl, up_cyl, delta=np.pi):
+    """
+    Unfold points on a cylinder of principal axis +X by projecting them
+    onto the cylinder tangents at the boundary of an angular sector of
+    size `delta` around the 'up' direction.
+
+    All arguments and return values are in cylindrical coordinates
+    (x, r, theta) around the +X axis.
+      - x:     coordinate along +X
+      - r:     radial distance in YZ-plane
+      - theta: angle around +X (0 along +Y, π/2 along +Z, etc.)
+
+    Args
+    ----
+    pts_cyl : np.ndarray, shape (..., 3)
+        Cylindrical coordinates (theta, r, x) to be unfolded.
+    up_cyl : np.ndarray, shape (3,)
+        Cylindrical coordinates (theta, r, x) of the 'up' direction
+        around which the angular sector of width `delta` is defined.
+        Only up_cyl[0] (theta_up) is used.
+    delta : float, optional
+        Total angular width of the sector to unfold (in radians).
+        The tangents are taken at angles theta1 and theta2 defined as
+        theta_up ± delta/2.
+
+    Returns
+    -------
+    res_cyl : np.ndarray, shape (..., 3)
+        Unfolded points, in cylindrical coordinates (theta, r, x).
+    """
+    theta_all = pts_cyl[..., 2]
+
+    # a. Get the two boundary angles, analogous to phi1 / phi2 in the sphere case
+    theta_up = up_cyl[2]
+    theta1 = normalize_angle(theta_up + delta / 2.0)
+    theta2 = normalize_angle(theta_up - delta / 2.0)
+    print(theta_up, theta1, theta2)
+
+    # b. Get arcs (two angular intervals around theta_up)
+    arc1_bounds = (theta_up, theta1)
+    arc2_bounds = (theta2, theta_up)
+
+    arc1_mask = in_interval_mod(theta_all, arc1_bounds[0], arc1_bounds[1], closed='both')
+    arc2_mask = in_interval_mod(theta_all, arc2_bounds[0], arc2_bounds[1], closed='both')
+    other_mask = ~(arc1_mask | arc2_mask)
+
+    arc1_pts_cyl = pts_cyl[arc1_mask]
+    arc2_pts_cyl = pts_cyl[arc2_mask]
+
+    # c. Project onto tangents at theta1 and theta2
+    arc1_proj_pts_cyl = get_cylinder_tangent(theta1, arc1_pts_cyl)
+    arc2_proj_pts_cyl = get_cylinder_tangent(theta2, arc2_pts_cyl)
+    other_pts_cyl = pts_cyl[other_mask]
+
+    # d. Re-assemble
+    res_cyl = np.zeros_like(pts_cyl)
+    res_cyl[arc1_mask]  = arc1_proj_pts_cyl
+    res_cyl[arc2_mask]  = arc2_proj_pts_cyl
+    res_cyl[other_mask] = other_pts_cyl
+
+    return res_cyl
 
 def remove_points_within_cone(pts_sph, forward_sph, delta=np.pi/2, eps=1e-12):
     """
@@ -2177,7 +2434,7 @@ def remove_points_within_cone(pts_sph, forward_sph, delta=np.pi/2, eps=1e-12):
     pts_cut_sph = pts_sph[mask_keep]
     return pts_cut_sph, mask_keep
 
-def unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0, eps=1e-12):
+def unfold_sphere_in_cylinder_uniform(pts_sph, forward_sph, base_radius=1.0, eps=1e-12):
     """
     Unfolds the northern hemisphere of a (possibly perturbed) sphere into a cylinder.
 
@@ -2985,19 +3242,19 @@ def open_world_carte(forward_carte, pts_carte, opening_mode='cut+cylinder', delt
     if opening_mode == 'wall':
         pts_sph = carte2sph_3D(pts_carte)
         forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened_sph = unfold_sphere_on_tangents(pts_sph, forward_sph, delta=np.pi)
         pts_opened = sph2carte_3D(pts_opened_sph)
         mask_keep = np.ones_like(pts_sph[..., 0], dtype=bool)
     elif opening_mode == 'cut+wall':
         pts_sph = carte2sph_3D(pts_carte)
         forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_walls(pts_sph, forward_sph, delta=np.pi)
+        pts_opened_sph = unfold_sphere_on_tangents(pts_sph, forward_sph, delta=np.pi)
         pts_opened = sph2carte_3D(pts_opened_sph)
         _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
     elif opening_mode == 'cut+cylinder':
         pts_sph = carte2sph_3D(pts_carte)
         forward_sph = carte2sph_3D(forward_carte)
-        pts_opened_sph = unfold_points_on_cylinder(pts_sph, forward_sph, base_radius=1.0)
+        pts_opened_sph = unfold_sphere_in_cylinder_uniform(pts_sph, forward_sph, base_radius=1.0)
         pts_opened = sph2carte_3D(pts_opened_sph)
         _, mask_keep = remove_points_within_cone(pts_sph, forward_sph, delta=delta_cut)
     elif opening_mode == 'remove_within_cone':
@@ -3349,6 +3606,41 @@ if __name__ == "__main__":
     plt.show()
 
     # test build_disk_to_square_displacement_fn
+    test_cylinder_wall_unfolding=False
+    if test_cylinder_wall_unfolding:
+
+        def cylinder_point_cloud(N=10000, radius=1.0, length=2.0):
+            # Uniform samples along the axis
+            u = np.random.uniform(-length/2, length/2, N)
+            
+            # Uniform angle around the axis
+            theta = np.random.uniform(0, 2*np.pi, N)
+            
+            # Points on cylinder surface
+            x = u
+            y = radius * np.cos(theta)
+            z = radius * np.sin(theta)
+            
+            return np.vstack((x, y, z)).T
+
+        pts_carte = cylinder_point_cloud(N=10000, radius=1.0, length=4.0)
+        pts_carte_prime = GeometryTransforms.correct_walls_cylinder_unfold(pts_carte)
+
+        # Visualization
+        fig = plt.figure(figsize=(12, 6))
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax1.scatter(pts_carte[:, 0], pts_carte[:, 1],
+                    pts_carte[:, 2], s=1, c='blue')
+        ax1.set_title("Original Cylinder Point Cloud")
+        set_equal_aspect_3d(ax1)
+        ax2 = fig.add_subplot(122, projection='3d')
+        ax2.scatter(pts_carte_prime[:, 0], pts_carte_prime[:, 1],
+                    pts_carte_prime[:, 2], s=1, c='green')
+        ax2.set_title("After Cylinder Wall Unfolding")
+        set_equal_aspect_3d(ax2)
+        plt.tight_layout()
+        plt.show()
+
     test_displancement_fn=True
     if test_displancement_fn:
         displacement_fn = build_disk_to_square_displacement_fn(

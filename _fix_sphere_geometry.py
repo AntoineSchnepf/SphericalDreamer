@@ -59,7 +59,20 @@ if __name__ == "__main__":
         [0, 0, 0, 1]
     ], dtype=np.float32)
     # --- script init end --- 
-
+    
+    sphere_correction_kwargs = {
+        "correct_depth": False,
+        "near": NEAR,
+        "far": FAR,
+        "correct_walls": True,
+        "correct_floor": True,
+        "depth_threshold_for_floor_correction": 0.6,
+        "remove_sky": False,
+        "indoor_or_outdoor": None,
+        "remove_outliers": True,
+        "verbose": False,
+        "plot": True,
+    }
 
     colors1, depth1 = my_utils.load_rgbd_pano(
         dream=0,
@@ -77,17 +90,7 @@ if __name__ == "__main__":
         pts1_carte, # in cartesian coordinates
         colors1, 
         height, width, 
-        correct_depth=False, 
-        near=NEAR, 
-        far=FAR, 
-        correct_walls=False, 
-        correct_floor=True, 
-        depth_threshold_for_floor_correction=0.6, 
-        remove_sky=False, 
-        indoor_or_outdoor=None, 
-        remove_outliers=True, 
-        verbose=False,
-        plot=True,
+        **sphere_correction_kwargs
     )
 
 
