@@ -2368,7 +2368,6 @@ def unfold_cylinder_on_tangents(pts_cyl, up_cyl, delta=np.pi):
     theta_up = up_cyl[2]
     theta1 = normalize_angle(theta_up + delta / 2.0)
     theta2 = normalize_angle(theta_up - delta / 2.0)
-    print(theta_up, theta1, theta2)
 
     # b. Get arcs (two angular intervals around theta_up)
     arc1_bounds = (theta_up, theta1)

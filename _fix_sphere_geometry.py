@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # --- script init end --- 
     
     sphere_correction_kwargs = {
-        "correct_depth": False,
+        "correct_depth": True,
         "near": NEAR,
         "far": FAR,
         "correct_walls": True,

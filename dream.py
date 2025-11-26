@@ -661,7 +661,7 @@ if __name__ == "__main__":
         
         assert np.allclose(pose_intermediate, pose_intermediate_bis), "Error in camera intermediate pose computation"
         pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, raise_intermediate_camera_by_z]))
-        # 5. Render points from sphere2 (opened right) + sphere2 (opened left), from the intermediate camera
+        # 5. Render points from sphere1 (opened right) + sphere2 (opened left), from the intermediate camera
         warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_v2(
             all_pts_world=np.concatenate((
                 sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
@@ -743,8 +743,7 @@ if __name__ == "__main__":
         my_utils.depth_numpy_to_PIL(depth_estimated).save(f"{save_dir_}/align_{i:02d}/07_estimated_depth.png")
         my_utils.depth_numpy_to_figure(depth_estimated).savefig(f"{save_dir_}/align_{i:02d}/07_estimated_depth_figure.png")
 
-
-        # 9. Blend depth
+        # 9. Align (Blend) depth
         new_colors = (np.array(pano_rgb_inpainted)/255.0)
 
         # (Naive blending)
@@ -782,6 +781,7 @@ if __name__ == "__main__":
         )
 
         # Add new points to their corresponding spheres.
+        # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
         (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
             pts_deformed_world, new_colors, pose1, pose2, translation_direction
         )
