@@ -1587,8 +1587,7 @@ class GeometryTransforms:
         gaussian_sigma_xy=(1.0, 1.0),
         reference_level='horizon',
         epsilon=0.0,
-        plot_horizon=False,
-        plot_floor_profile=False,
+        plot=False,
         horizon_deg=(-10.0, -1.0),
     ):
         """
@@ -1622,8 +1621,8 @@ class GeometryTransforms:
             gaussian_sigma_xy=gaussian_sigma_xy,
             reference_level=reference_level,
             epsilon=epsilon,
-            plot_horizon=plot_horizon,
-            plot_floor_profile=plot_floor_profile,
+            plot_horizon=plot,
+            plot_floor_profile=plot,
             horizon_deg=horizon_deg,
             horizon_colors=colors,
         )
@@ -1631,24 +1630,24 @@ class GeometryTransforms:
         C_all = C_func(X, Y)
         Z_corrected = Z + C_all
 
+        if plot:
+            mask = (theta > -np.pi) & (theta < 0)
+            plt.figure(figsize=(10,4))
+            plt.subplot(2,2,1)
+            plt.scatter(Y[mask], Z[mask], s=1, c='steelblue'); plt.grid(True)
+            plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before (masked θ∈(-π,0))')
+            plt.subplot(2,2,2)
+            plt.scatter(Y[mask], Z_corrected[mask], s=1, c='crimson'); plt.grid(True)
+            plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction (masked)')
 
-        mask = (theta > -np.pi) & (theta < 0)
-        plt.figure(figsize=(10,4))
-        plt.subplot(2,2,1)
-        plt.scatter(Y[mask], Z[mask], s=1, c='steelblue'); plt.grid(True)
-        plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before (masked θ∈(-π,0))')
-        plt.subplot(2,2,2)
-        plt.scatter(Y[mask], Z_corrected[mask], s=1, c='crimson'); plt.grid(True)
-        plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction (masked)')
+            plt.subplot(2,2,3)
+            plt.scatter(Y, Z, s=1, c='steelblue'); plt.grid(True)
+            plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before ')
+            plt.subplot(2,2,4)
+            plt.scatter(Y, Z_corrected, s=1, c='crimson'); plt.grid(True)
+            plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction')
 
-        plt.subplot(2,2,3)
-        plt.scatter(Y, Z, s=1, c='steelblue'); plt.grid(True)
-        plt.xlabel('Y'); plt.ylabel('Z'); plt.title('Before ')
-        plt.subplot(2,2,4)
-        plt.scatter(Y, Z_corrected, s=1, c='crimson'); plt.grid(True)
-        plt.xlabel('Y'); plt.ylabel('Z corrected'); plt.title('After correction')
-
-        plt.tight_layout(); plt.show()
+            plt.tight_layout(); plt.show()
         
         pts_corrected = np.stack((X, Y, Z_corrected), axis=-1)
         return pts_corrected
@@ -1972,7 +1971,7 @@ def run_corrective_pipeline_on_sphere(
             correct_until_depth_metric=correct_until_depth_metric,
             dx=0.05,
             dy=0.05,
-            plot_floor_profile=plot,
+            plot=plot,
         )
 
         if verbose:
@@ -2136,7 +2135,7 @@ def run_corrective_pipeline_on_world(
             theta=theta,
             colors=colors,
             correct_until_depth_metric=correct_until_depth_metric,
-            plot_floor_profile=plot,
+            plot=plot,
         )
 
         if verbose:
