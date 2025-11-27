@@ -643,14 +643,22 @@ def cyl2cart_zaxis(cyl):
 # ----- Panorama / Pointcloud utils  ----- #
 # ---------------------------------------- #
 def load_rgbd_pano(dream, save_dir_, override_depth_with_ones=False):
-
-    pano_rgb = Image.open(f"{save_dir_}/dream_{dream:02d}/XX_pano_rgb.png")
-    depth = np.load(f"{save_dir_}/dream_{dream:02d}/XX_depth.npy")
+    load_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
+    pano_rgb = Image.open(os.path.join(load_dir__, "XX_pano_rgb.png"))
+    depth = np.load(os.path.join(load_dir__, "XX_depth.npy"))
     if override_depth_with_ones:
         depth = np.ones_like(depth)  
         print("WARNING: depth override to ones for debugging purposes")
     colors = np.array(pano_rgb)/255.0
     return colors, depth
+
+def save_rgbd_pano(pano_rgb, depth, dream, save_dir_):
+    save_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
+    os.makedirs(save_dir__, exist_ok=True)
+    pano_rgb.save(os.path.join(save_dir__, "XX_pano_rgb.png"))
+    np.save(os.path.join(save_dir__, "XX_depth.npy"), depth)
+    depth_numpy_to_PIL(depth).save(os.path.join(save_dir__, "XX_depth.png"))
+    depth_numpy_to_figure(depth).savefig(os.path.join(save_dir__, "XX_depth_figure.png"))
 
 class PointCloud:
     def __init__(self, pts, colors):
@@ -2016,6 +2024,7 @@ def run_corrective_pipeline_on_world(
     correct_walls, 
     correct_floor, 
     depth_threshold_for_floor_correction, 
+    remove_outliers,
     verbose=False,
     plot=False,
 ):
@@ -2142,9 +2151,21 @@ def run_corrective_pipeline_on_world(
         if verbose:
             print("b. Cylindrical Floor Corrected.")
 
-    return final_pts
-    
+    # 7. Remove statistical outliers
+    if remove_outliers: 
+        n_before = len(final_pts.reshape(-1,3))
+        final_pts, colors = GeometryTransforms.remove_statistical_outliers(
+            pts=final_pts,
+            colors=colors,
+            nb_neighbors=20,
+            std_ratio=1.8
+        )
+        n_after = len(final_pts.reshape(-1,3))
+        if verbose:
+            print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
 
+    return final_pts, colors
+    
 
 # ----------------------------- #
 # ----- Utility functions ----- #
@@ -2206,6 +2227,187 @@ def in_interval_mod(phi, start, end, closed='both', atol=1e-12):
         # Wrapping interval (crosses 0): [a, 2π) ∪ [0, b]
         return ge(phi, a) | le(phi, b)
 
+def _rotation_matrix_to_quaternion(R):
+    """
+    Convert a 3x3 rotation matrix to a quaternion [w, x, y, z].
+    """
+    R = np.asarray(R, dtype=float)
+    assert R.shape == (3, 3)
+
+    trace = np.trace(R)
+    if trace > 0.0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (R[2, 1] - R[1, 2]) * s
+        y = (R[0, 2] - R[2, 0]) * s
+        z = (R[1, 0] - R[0, 1]) * s
+    else:
+        # Find the major diagonal element
+        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            w = (R[2, 1] - R[1, 2]) / s
+            x = 0.25 * s
+            y = (R[0, 1] + R[1, 0]) / s
+            z = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            w = (R[0, 2] - R[2, 0]) / s
+            x = (R[0, 1] + R[1, 0]) / s
+            y = 0.25 * s
+            z = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            w = (R[1, 0] - R[0, 1]) / s
+            x = (R[0, 2] + R[2, 0]) / s
+            y = (R[1, 2] + R[2, 1]) / s
+            z = 0.25 * s
+
+    q = np.array([w, x, y, z], dtype=float)
+    return q / np.linalg.norm(q)
+
+def _quaternion_to_rotation_matrix(q):
+    """
+    Convert a quaternion [w, x, y, z] to a 3x3 rotation matrix.
+    """
+    q = np.asarray(q, dtype=float)
+    q = q / np.linalg.norm(q)
+    w, x, y, z = q
+
+    R = np.array([
+        [1 - 2 * (y * y + z * z),     2 * (x * y - z * w),     2 * (x * z + y * w)],
+        [    2 * (x * y + z * w), 1 - 2 * (x * x + z * z),     2 * (y * z - x * w)],
+        [    2 * (x * z - y * w),     2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
+    ], dtype=float)
+    return R
+
+def _slerp(q0, q1, t):
+    """
+    Spherical linear interpolation between two quaternions q0, q1 at parameter t in [0, 1].
+    q0, q1: (..., 4)
+    t: scalar or array broadcastable to q0.shape[:-1]
+    """
+    q0 = np.asarray(q0, dtype=float)
+    q1 = np.asarray(q1, dtype=float)
+
+    # Normalize just in case
+    q0 = q0 / np.linalg.norm(q0)
+    q1 = q1 / np.linalg.norm(q1)
+
+    dot = np.dot(q0, q1)
+
+    # If dot < 0, the interpolation will take the long way around the sphere.
+    # Fix by reversing one quaternion.
+    if dot < 0.0:
+        q1 = -q1
+        dot = -dot
+
+    # If very close, fall back to linear interpolation to avoid numerical issues.
+    if dot > 0.9995:
+        q = q0 + t * (q1 - q0)
+        return q / np.linalg.norm(q)
+
+    # theta is angle between input quaternions
+    theta_0 = np.arccos(np.clip(dot, -1.0, 1.0))
+    sin_theta_0 = np.sin(theta_0)
+
+    theta = theta_0 * t
+    sin_theta = np.sin(theta)
+
+    s0 = np.sin(theta_0 - theta) / sin_theta_0
+    s1 = sin_theta / sin_theta_0
+
+    q = s0 * q0 + s1 * q1
+    return q / np.linalg.norm(q)
+
+def get_intermediate_camera_poses(
+        start_pose,
+        end_pose,
+        num_steps,
+        perturb_z=0.0,
+        perturb_y=0.0,
+        perturb_x=0.0,
+    ):
+    """
+    Generate a list of intermediate camera poses between start_pose and end_pose.
+
+    Each pose is a 4x4 transformation matrix. Rotations are interpolated
+    using quaternion SLERP; translations are linearly interpolated and can
+    be optionally perturbed by Gaussian noise along each axis.
+
+    Parameters
+    ----------
+    start_pose : array-like, shape (4, 4)
+        Starting camera pose (world-to-camera or camera-to-world; must be
+        consistent with end_pose).
+    end_pose : array-like, shape (4, 4)
+        Ending camera pose.
+    num_steps : int
+        Number of poses to generate, including both start and end.
+        Must be >= 2.
+    perturb_z : float, default 0.0
+        Standard deviation of Gaussian noise added to the Z translation
+        component at each step.
+    perturb_y : float, default 0.0
+        Standard deviation of Gaussian noise added to the Y translation
+        component at each step.
+    perturb_x : float, default 0.0
+        Standard deviation of Gaussian noise added to the X translation
+        component at each step.
+
+    Returns
+    -------
+    poses : np.ndarray, shape (num_steps, 4, 4)
+        Interpolated camera poses.
+    """
+    start_pose = np.asarray(start_pose, dtype=float)
+    end_pose = np.asarray(end_pose, dtype=float)
+
+    if start_pose.shape != (4, 4) or end_pose.shape != (4, 4):
+        raise ValueError("start_pose and end_pose must be 4x4 matrices.")
+    if num_steps < 2:
+        raise ValueError("num_steps must be at least 2.")
+
+    # Extract rotations (3x3) and translations (3,)
+    R0 = start_pose[:3, :3]
+    t0 = start_pose[:3, 3]
+
+    R1 = end_pose[:3, :3]
+    t1 = end_pose[:3, 3]
+
+    # Convert rotations to quaternions
+    q0 = _rotation_matrix_to_quaternion(R0)
+    q1 = _rotation_matrix_to_quaternion(R1)
+
+    # Interpolation parameters
+    ts = np.linspace(0.0, 1.0, num_steps)
+
+    poses = np.zeros((num_steps, 4, 4), dtype=float)
+
+    for i, alpha in enumerate(ts):
+        # SLERP between rotations
+        qi = _slerp(q0, q1, alpha)
+        Ri = _quaternion_to_rotation_matrix(qi)
+
+        # Linear interpolation between translations
+        ti = (1.0 - alpha) * t0 + alpha * t1
+
+        # Add optional Gaussian perturbations on translation
+        if (perturb_x != 0.0) or (perturb_y != 0.0) or (perturb_z != 0.0):
+            noise = np.array([
+                np.random.normal(0.0, perturb_x),
+                np.random.normal(0.0, perturb_y),
+                np.random.normal(0.0, perturb_z),
+            ])
+            ti = ti + noise
+
+        # Build 4x4 pose
+        pose_i = np.eye(4, dtype=float)
+        pose_i[:3, :3] = Ri
+        pose_i[:3, 3] = ti
+
+        poses[i] = pose_i
+
+    return poses
 
 # --------------------------------------------#
 # ----   World Opening transformations -----  #
