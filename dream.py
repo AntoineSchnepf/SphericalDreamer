@@ -814,6 +814,7 @@ if __name__ == "__main__":
             )
 
             # 10. Add new points to their corresponding spheres.
+        # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
             (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
                 new_pts, new_colors, pose1, pose2, translation_direction
             )
