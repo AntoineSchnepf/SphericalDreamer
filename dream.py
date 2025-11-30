@@ -23,7 +23,6 @@ _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monod
 sys.path.append(_360monodepth_install_dir) 
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
-from egformer import get_egformer_depth
 import my_utils
 
 logging.disable(logging.CRITICAL + 1)
@@ -113,6 +112,7 @@ class SphericalDreamer:
         returns:
             pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1] 
         """
+        from egformer import get_egformer_depth
         pano_rgb_pil = Image.fromarray(pano_rgb.astype(np.uint8))
         pano_depth_pil = get_egformer_depth([pano_rgb_pil])[0]
         pano_depth = np.array(pano_depth_pil.convert("L")).astype(np.float32) / 255.0
@@ -125,6 +125,7 @@ class SphericalDreamer:
         self.pano_inpaint_pipeline.enable_model_cpu_offload()
         # pipe.enable_vae_tiling() #todo test with or without this?
 
+    @torch.no_grad()   
     def inpaint_pano(self, prompt, pano_rgb, mask, seed_override=None):
         "pano_rgb, mask: PIL.Image"
 
@@ -201,6 +202,7 @@ class SphericalDreamer:
         # self.improve_resolution_pipeline.load_lora_weights(self.flux_lora_pano_path)  # change this.
         self.improve_resolution_pipeline.enable_model_cpu_offload()
 
+    @torch.no_grad()   
     def improve_pano_resolution(self, pano_rgb, prompt, controlnet_conditioning_scale=0.2):
 
         if not self.is_improve_resolution_model_init:
@@ -223,6 +225,7 @@ class SphericalDreamer:
         from src.lama import LamaInpainting
         self.lama_model = LamaInpainting()
 
+    @torch.no_grad()   
     def lama_inpaint(self, image:Image, mask:Image):
         """
         image: PIL.Image (RGB)
@@ -235,13 +238,13 @@ class SphericalDreamer:
         return Image.fromarray(self.lama_model(image, mask))
 
 
-def get_missing_info_mask(operations, visited_pixels, log_mask=True):
+def get_missing_info_mask(operations, visited_pixels, log_mask=True, where_save=None):
     missing_info_masks = [~visited_pixels]
     for op in operations:
         missing_info_masks.append(op(missing_info_masks[-1]))
     if log_mask:
         missing_info_masks_tile = my_utils.tile_image([my_utils.numpy_to_PIL(m) for m in missing_info_masks])
-        missing_info_masks_tile.save(f"{save_dir_}/align_{i:02d}/02_missing_info_masks_tile.png")
+        missing_info_masks_tile.save(f"{where_save}/02_missing_info_masks_tile.png")
     missing_info_mask = missing_info_masks[-1]
     return missing_info_mask
 
@@ -274,7 +277,7 @@ def get_mask_fixed(forward, pts):
     mask_fixed = cosine_similarity >= 0
     return mask_fixed
 
-def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True):
+def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True, where_save=None):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
         - points in the good region of warped_depth_interp stay unchanged
@@ -297,7 +300,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(f"{save_dir_}/align_{i:02d}/07_harmonic_blending_masks.png")
+        plt.savefig(os.path.join(where_save, "07_harmonic_blending_masks.png"))
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -360,14 +363,14 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(f"{save_dir_}/align_{i:02d}/08_blended_depth_harmonic.png")
+        plt.savefig(os.path.join(where_save, "08_blended_depth_harmonic.png"))
         plt.show()
 
         return pts_deformed, colors2, pcd_harmonic, blended_depth_harmonic
 
     return pts_deformed, colors2
 
-def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True):
+def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True, where_save=None):
 
     if logging:
 
@@ -386,7 +389,7 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
         plt.imshow(blended_depth, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Naive')
-        plt.savefig(f"{save_dir_}/align_{i:02d}/08_blended_depth_naive.png")
+        plt.savefig(os.path.join(where_save, "08_blended_depth_naive.png"))
         plt.show()
 
     return pcd_naive, blended_depth
@@ -455,7 +458,7 @@ def split_new_points(pts, colors, pose1, pose2, forward):
     pts_neutral, colors_neutral = pts[where_neutral], colors[where_neutral]
     return (pts1, colors1), (pts2, colors2), (pts_neutral, colors_neutral)
 
-def correct_walls(x, y, p=6.0):
+def correct_walls_lp(x, y, p=6.0):
     mask = y > 0
     x_corr = x.copy()
     y_corr = y.copy()
@@ -474,24 +477,147 @@ def correct_walls(x, y, p=6.0):
 
     return x_corr, y_corr
 
+def generate_missing_points_from_pose(
+        current_points, 
+        current_colors, 
+        camera_pose, 
+        height,
+        width,
+        skip_inpainting, 
+        where_save=None
+    ):
+
+    # 4. Render points from sphere2 (opened right) + sphere2 (opened left), from the intermediate camera
+    warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_v2(
+        all_pts_world=current_points, 
+        all_colors_world=current_colors, 
+        pose=camera_pose,
+        height=height,
+        width=width
+    )
+    print("Rendered all points from intermediate camera!")
+
+    # 5. Get missing info mask
+    operations = [
+        partial(minimum_filter, size=(3,3), axes=(0,1)),
+        partial(maximum_filter, size=(3,3), axes=(0,1)),
+        partial(maximum_filter, size=(3,3), axes=(0,1)),
+        partial(maximum_filter, size=(3,3), axes=(0,1)),
+        # partial(maximum_filter, size=(8, 8), axes=(0,1)),
+    ]
+    missing_info_mask = get_missing_info_mask(operations, visited_pixels, log_mask=True, where_save=where_save) 
+    where_depth_nan = np.isnan(warped_depth_interp)
+    missing_info_mask = missing_info_mask | where_depth_nan
+    inpainting_mask = missing_info_mask # TODO: (Antoine, 14 oct) The inpainting mask is currently composed of both <<large missing regions due to limited covering of the main spheres>> and <<small holes due to occlusions>>. We could separate these two cases and do something neater?.
+
+    warped_img_interp[missing_info_mask] = np.nan
+    warped_depth_interp[missing_info_mask] = np.nan
+    my_utils.numpy_to_PIL(warped_img).save(os.path.join(where_save, "01_warped_img.png"))
+    my_utils.depth_numpy_to_PIL(warped_depth).save(os.path.join(where_save, "01_warped_depth.png")    )
+    my_utils.numpy_to_PIL(warped_img_interp).save(os.path.join(where_save, "03_warped_img_interp.png"))
+    my_utils.depth_numpy_to_PIL(warped_depth_interp).save(os.path.join(where_save, "03_warped_depth_interp.png"))
+    my_utils.depth_numpy_to_figure(warped_depth_interp).savefig(os.path.join(where_save, "03_warped_depth_interp_figure.png"))
+    # np.save(f"{save_dir_}/{where_save}/03_warped_depth_interp.npy", warped_depth_interp)
+    
+    # 6. Inpainting
+    overlay_before = my_utils.numpy_to_PIL(my_utils.overlay_mask(warped_img_interp, inpainting_mask, alpha=0.5)) 
+    overlay_before.save(os.path.join(where_save, "04_overlay_before_inpainting.png"))
+    if not skip_inpainting: 
+        pano_inpainted_raw = spherical_dreamer.inpaint_pano(
+            prompt=prompt, 
+            pano_rgb=my_utils.numpy_to_PIL(warped_img_interp), 
+            mask=my_utils.numpy_to_PIL(inpainting_mask)
+        )
+        pano_inpainted_raw.save(os.path.join(where_save, "XX_pano_rgb_inpainted_raw.png"))
+    else:
+        pano_inpainted_raw = Image.open(os.path.join(where_save, "XX_pano_rgb_inpainted_raw.png"))
+    pano_inpainted_raw.save(os.path.join(where_save, "04_pano_rgb_inpainted_raw.png"))
+
+    # 7. Inpainting seamless blending
+    pano_blend1, pano_blend2, mask_blend1, mask_blend2 = spherical_dreamer.blend(
+        pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
+        pano_inpainted_raw=pano_inpainted_raw,
+        missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
+        horizon_mask=my_utils.numpy_to_PIL(np.zeros_like(missing_info_mask).astype('bool')),
+    )
+    #TODO: since we removed horizon, check the blending strategy again. It is `compose` everywhere now. Should be seamless for the large inapainted part
+    #TODO: Also, Check if we need both blend1 and blend2
+    
+    mask_blend1.save(os.path.join(where_save, "05_blend1_mask.png"))
+    mask_blend2.save(os.path.join(where_save, "05_blend2_mask.png"))
+    pano_blend1.save(os.path.join(where_save, "05_blend1_pano_rgb_inpainted.png"))
+    pano_blend2.save(os.path.join(where_save, "05_blend2_pano_rgb_inpainted.png"))
+
+    pano_rgb_inpainted = pano_blend2
+    pano_rgb_inpainted.save(os.path.join(where_save, "06_pano_rgb_inpainted.png")) #TODO: this is the same as blend2. Remove repetition
+
+    # 8. Estimate depth
+    # TODO: (Antoine, 16 OCT) LayerPANO3D Has a depth inpainting model, which may be better than this + harmonic blending. Worth testing.
+    if not skip_inpainting:
+        depth_estimated = spherical_dreamer.estimate_pano_depth(
+            pano_rgb=np.array(pano_rgb_inpainted)
+        )
+        np.save(os.path.join(where_save, "XX_estimated_depth.npy"), depth_estimated)
+    else:
+        depth_estimated = np.load(os.path.join(where_save, "XX_estimated_depth.npy"))
+    # depth_estimated=np.ones_like(depth_estimated) * sphere_radius  
+    # print("WARNING: estimated depth override to ones for debugging purposes")
+    my_utils.depth_numpy_to_PIL(depth_estimated).save(os.path.join(where_save, "07_estimated_depth.png"))
+    my_utils.depth_numpy_to_figure(depth_estimated).savefig(os.path.join(where_save, "07_estimated_depth_figure.png"))
+
+
+    # 9. Blend depth
+    new_colors = (np.array(pano_rgb_inpainted)/255.0)
+
+    # (Naive blending)
+    # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
+    pcd_naive, blended_depth_naive = naive_blend_of_depths(
+        colors=new_colors,
+        warped_depth_interp=warped_depth_interp,
+        depth_estimated=depth_estimated,
+        missing_info_mask=missing_info_mask,
+        pose=camera_pose,
+        sphere_radius=sphere_radius,
+        height=height,
+        width=width,
+        logging=True,
+        where_save=where_save
+    )
+
+    # (Harmonic blending)
+    pts_deformed_world, new_colors, pcd_harmonic, blended_depth_harmonic = harmonic_blend_of_depths(
+        colors=new_colors,
+        warped_depth_interp=warped_depth_interp,
+        depth_estimated=depth_estimated,
+        missing_info_mask=missing_info_mask,
+        pose=camera_pose,
+        sphere_radius=sphere_radius,
+        height=height,
+        width=width,
+        logging=True,
+        where_save=where_save
+    )
+
+    return pts_deformed_world, new_colors, pcd_naive, pcd_harmonic
 
 
 if __name__ == "__main__":
     # ---- args ----
     debug = False
-    skip_phase1 = True
+    skip_phase0 = True
     skip_inpainting = False
+    skip_phase1 = False
+    skip_filling=False
     save_dir = "OUTPUTS/SphericalDreamerRecurse"
 
     # dreaming args
-    num_dreams = 5
-    seeds = [119224, 119224+9, 119224+20, 119224+33, 119224+45]
+    num_dreams = 3
     translation_direction = my_utils.get_norm_vector(np.array([1, 0, 0], dtype=np.float32))
     sphere_radius = 1.0
     depth_model = "360mono"  # "360mono" or "egformer"
     FAR=1.0
     NEAR=0.01
-    delta_walk =  FAR * np.pi / 2
+    delta_walk = FAR * np.pi / 2
     raise_intermediate_camera_by_z = 0.3    
     override_with_inpaint=False
     if depth_model == 'egformer':
@@ -500,19 +626,20 @@ if __name__ == "__main__":
     else:
         width = 1440
         height = 720
+    seeds = [119224, 119224+9, 119224+20, 119224+33, 119224+45]
     prompts = [
         "A realistic illustration of a college campus. In the middle ground, several academic buildings with brick facades and large windows stand prominently. In the background, a bright blue sky with scattered clouds stretches across the scene. In the foreground, a few elements commonly found on campus, such as students walking, bicycles parked along a path, and a grassy lawn with trees, add depth and life to the scene.",
         "A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.",
         "A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.",
-        "A bustling city street at night, neon lights reflecting on wet pavement, realism style. Buildings are seen from a distance, with cars and pedestrians adding life to the scene.",
+        "A bustling city street at night, neon lights reflecting on wet pavement, realism style.",
         # "Sandy beach, large driftwood in the foreground, calm sea beyond, realism style.",
         # "A wide field under daylight, covered in lush green grass with worn paths where the grass has been trampled by many footsteps. In the center of the field stands a large concert stage, decorated with bold triangular patterns. On the stage rests a single guitar, but no performers are present. In front of the stage, a lively crowd gathers, waiting for the show to begin."
     ]
     expnames=[
-        "29_campus",
-        "29_seaside",
-        "29_forest",
-        "29_city",
+        "31_campus",
+        "31_seaside",
+        "31_forest",
+        "31_city",
     ]
     indoor_or_outdoor_list = [
         'outdoor',
@@ -526,7 +653,7 @@ if __name__ == "__main__":
     parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=2)
     if True:
         args = parser.parse_args([
-            '--exp_id', '3'
+            '--exp_id', '2'
         ])
         for _ in range(10):
             print(f"/!\ DEBUG MODE IS ON. Running exp {args.exp_id}/!\ ")
@@ -535,7 +662,6 @@ if __name__ == "__main__":
 
     expname, prompt, indoor_or_outdoor = expnames[args.exp_id], prompts[args.exp_id], indoor_or_outdoor_list[args.exp_id]
 
-    # 0. Initialization
     spherical_dreamer = SphericalDreamer(
         pano_width=width,
         pano_height=height,
@@ -544,285 +670,261 @@ if __name__ == "__main__":
     )
     save_dir_ = f"{save_dir}/{expname}"
     
-    # PHASE 0. GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH
-    if not skip_phase1:
+    pose_init = np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+    pose_end = my_utils.camera_translation(pose_init, delta_walk * translation_direction * (num_dreams-1))
+
+
+    # ---- PHASE 0. ----- GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH
+    if not skip_phase0:
         for i in range(num_dreams):
             print(f"--- Dreaming Phase {i:02d} / {num_dreams} ---")
 
             # Generate panorama & Estimate Depth
             pano_rgb = spherical_dreamer.gen_pano(prompt=prompt, override_with_inpaint=override_with_inpaint, seed_override=seeds[i])
             depth = spherical_dreamer.estimate_pano_depth(pano_rgb=np.array(pano_rgb))
-            os.makedirs(os.path.join(save_dir_, f"dream_{i:02d}"), exist_ok=True)
-            pano_rgb.save(f"{save_dir_}/dream_{i:02d}/XX_pano_rgb.png")
-            np.save(f"{save_dir_}/dream_{i:02d}/XX_depth.npy", depth)
-            my_utils.depth_numpy_to_PIL(depth).save(f"{save_dir_}/dream_{i:02d}/XX_depth.png")
-            my_utils.depth_numpy_to_figure(depth).savefig(f"{save_dir_}/dream_{i:02d}/XX_depth_figure.png")
+            my_utils.save_rgbd_pano(
+                pano_rgb=pano_rgb,
+                depth=depth,
+                dream=i,
+                save_dir_=save_dir_
+            )
+    # --- END PHASE 0. ---
 
 
-    pointclouds = {}
-    all_pts_world = np.array([]).reshape(0, 3)
-    all_colors_world = np.array([]).reshape(0, 3)
-
+    # ----- args PHASES I -----
     opening_kwargs = {
         'opening_mode': 'cut+cylinder',
         'delta_cut': 2*np.pi/3,
     }
+    sphere_correction_kwargs = {
+        "correct_depth": False,
+        "near": NEAR,
+        "far": FAR,
+        "correct_walls": False,
+        "correct_floor": False,
+        "depth_threshold_for_floor_correction": 0.6,
+        "remove_sky": False,
+        "indoor_or_outdoor": None,
+        "remove_outliers": True,
+        "verbose": False,
+        "plot": True,
+    }
+    # --- end args PHASES I ---
 
-    # PHASE I. INIT FIRST SPHERE
     print(f"--- Opening first sphere ---")
-    pose1 = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
+    # PHASE I. ALIGN PAIRS OF SPHERES WITH INPAINTING + HARMONIC BLENDING
+    if not skip_phase1:
+        # PHASE 1: INIT
+        pointclouds = {}
+        all_pts_world = np.array([]).reshape(0, 3)
+        all_colors_world = np.array([]).reshape(0, 3)
 
-
-    colors1, depth1 = my_utils.load_rgbd_pano(
-        dream=0,
-        save_dir_=save_dir_
-    )
-    pts1_carte = my_utils.depth2cam_carte(
-        depth=depth1,
-        sphere_radius=sphere_radius,
-        height=height,
-        width=width,
-    ) 
-    pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
-        pts1_carte, # in cartesian coordinates
-        colors1, 
-        height, width, 
-        correct_depth=False, 
-        near=NEAR, 
-        far=FAR, 
-        correct_walls=True, 
-        correct_floor=True, 
-        depth_threshold_for_floor_correction=0.6, 
-        remove_sky=False, 
-        indoor_or_outdoor=None, 
-        remove_outliers=True, 
-        verbose=False,
-        plot=True,
-    )
-    sphere1 = my_utils.Sphere(
-        pose1, pts1_carte_corrected, colors1_corrected, 
-        forward_carte=translation_direction,
-        opening_kwargs=opening_kwargs,
-    )
-
-    # PHASE II. ALIGNMENT PHASE WITH INPAINTING + HARMONIC BLENDING
-    for i in range(1, num_dreams):
-        print(f"--- Inpainting+Alignment Phase {i:02d} / {num_dreams-1} ---")
-        os.makedirs(os.path.join(save_dir_, f"align_{i:02d}"), exist_ok=True)
-
-        # 1. Load new sphere and open it (left)
-        colors2, depth2 = my_utils.load_rgbd_pano(
-            dream=i,
+        colors1, depth1 = my_utils.load_rgbd_pano(
+            dream=0,
             save_dir_=save_dir_
         )
-        pts2_carte = my_utils.depth2cam_carte(
-            depth=depth2,
+        pts1_carte = my_utils.depth2cam_carte(
+            depth=depth1,
             sphere_radius=sphere_radius,
             height=height,
             width=width,
-        ) 
-        pts2_carte_corrected, colors2_corrected = my_utils.run_corrective_pipeline_on_sphere(
-            pts2_carte, # in cartesian coordinates
-            colors2, 
-            height, width, 
-            correct_depth=False, 
-            near=NEAR, 
-            far=FAR, 
-            correct_walls=True, 
-            correct_floor=True, 
-            depth_threshold_for_floor_correction=0.6, 
-            remove_sky=False, 
-            indoor_or_outdoor=None, 
-            remove_outliers=True, 
-            verbose=False,
-            plot=True,
         )
-        
-        sphere2 = my_utils.Sphere(
-            None, pts2_carte_corrected, colors2_corrected, 
+        pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
+            pts1_carte, # in cartesian coordinates
+            colors1, 
+            height, width, 
+            **sphere_correction_kwargs
+        )
+        sphere1 = my_utils.Sphere(
+            None, pts1_carte_corrected, colors1_corrected, 
             forward_carte=translation_direction,
             opening_kwargs=opening_kwargs,
         )
+        pose1 = pose_init
+        sphere1.update_pose(pose1)
 
-        # 2. Move camera
-        pose2 = my_utils.camera_translation(pose1, delta_walk * translation_direction)
-        sphere2.update_pose(pose2)
-        
-        print('Loaded and opened sphere!')
+        # PHASE 1. INPAINTING + HARMONIC BLENDING
+        for i in range(1, num_dreams):
+            print(f"--- Inpainting+Alignment Phase {i:02d} / {num_dreams-1} ---")
+            save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
+            os.makedirs(save_dir__, exist_ok=True)
 
-        # 4. Go to intermediate camera (between cam1 and cam2)
-        pose_intermediate = my_utils.camera_translation(pose2, -delta_walk/2 * translation_direction)
-        pose_intermediate_bis = my_utils.camera_translation(pose1, delta_walk/2 * translation_direction)
-        
-        assert np.allclose(pose_intermediate, pose_intermediate_bis), "Error in camera intermediate pose computation"
-        pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, raise_intermediate_camera_by_z]))
-        # 5. Render points from sphere1 (opened right) + sphere2 (opened left), from the intermediate camera
-        warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_v2(
-            all_pts_world=np.concatenate((
-                sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
-            ), axis=0), 
-            all_colors_world=np.concatenate((
-                sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
-            ), axis=0), 
-            pose=pose_intermediate,
-            height=height,
-            width=width
-        )
-        print("Rendered all points from intermediate camera!")
-
-        # 6. Get missing info mask
-        operations = [
-            partial(minimum_filter, size=(3,3), axes=(0,1)),
-            partial(maximum_filter, size=(3,3), axes=(0,1)),
-            partial(maximum_filter, size=(3,3), axes=(0,1)),
-            partial(maximum_filter, size=(3,3), axes=(0,1)),
-            # partial(maximum_filter, size=(8, 8), axes=(0,1)),
-        ]
-        missing_info_mask = get_missing_info_mask(operations, visited_pixels, log_mask=True) 
-        where_depth_nan = np.isnan(warped_depth_interp)
-        missing_info_mask = missing_info_mask | where_depth_nan
-        inpainting_mask = missing_info_mask # TODO: (Antoine, 14 oct) The inpainting mask is currently composed of both <<large missing regions due to limited covering of the main spheres>> and <<small holes due to occlusions>>. We could separate these two cases and do something neater?.
-
-        warped_img_interp[missing_info_mask] = np.nan
-        warped_depth_interp[missing_info_mask] = np.nan
-        my_utils.numpy_to_PIL(warped_img).save(f"{save_dir_}/align_{i:02d}/01_warped_img.png")
-        my_utils.depth_numpy_to_PIL(warped_depth).save(f"{save_dir_}/align_{i:02d}/01_warped_depth.png")    
-        my_utils.numpy_to_PIL(warped_img_interp).save(f"{save_dir_}/align_{i:02d}/03_warped_img_interp.png")
-        my_utils.depth_numpy_to_PIL(warped_depth_interp).save(f"{save_dir_}/align_{i:02d}/03_warped_depth_interp.png")
-        my_utils.depth_numpy_to_figure(warped_depth_interp).savefig(f"{save_dir_}/align_{i:02d}/03_warped_depth_interp_figure.png")
-        # np.save(f"{save_dir_}/align_{i:02d}/03_warped_depth_interp.npy", warped_depth_interp)
-        
-        # 7. Inpainting
-        overlay_before = my_utils.numpy_to_PIL(my_utils.overlay_mask(warped_img_interp, inpainting_mask, alpha=0.5)) 
-        overlay_before.save(f"{save_dir_}/align_{i:02d}/04_overlay_before_inpainting.png")
-        if not skip_inpainting: 
-            pano_inpainted_raw = spherical_dreamer.inpaint_pano(
-                prompt=prompt, 
-                pano_rgb=my_utils.numpy_to_PIL(warped_img_interp), 
-                mask=my_utils.numpy_to_PIL(inpainting_mask)
+            # 1. Load new sphere and open it (left)
+            colors2, depth2 = my_utils.load_rgbd_pano(
+                dream=i,
+                save_dir_=save_dir_
             )
-            pano_inpainted_raw.save(f"{save_dir_}/align_{i:02d}/XX_pano_rgb_inpainted_raw.png")
-        else:
-            pano_inpainted_raw = Image.open(f"{save_dir_}/align_{i:02d}/XX_pano_rgb_inpainted_raw.png")
-        pano_inpainted_raw.save(f"{save_dir_}/align_{i:02d}/04_pano_rgb_inpainted_raw.png")
-
-        # 7. Inpainting seamless blending
-        pano_blend1, pano_blend2, mask_blend1, mask_blend2 = spherical_dreamer.blend(
-            pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
-            pano_inpainted_raw=pano_inpainted_raw,
-            missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
-            horizon_mask=my_utils.numpy_to_PIL(np.zeros_like(missing_info_mask).astype('bool')),
-        )
-        #TODO: since we removed horizon, check the blending strategy again. It is `compose` everywhere now. Should be seamless for the large inapainted part
-        #TODO: Also, Check if we need both blend1 and blend2
-        
-        mask_blend1.save(f"{save_dir_}/align_{i:02d}/05_blend1_mask.png")
-        mask_blend2.save(f"{save_dir_}/align_{i:02d}/05_blend2_mask.png")
-        pano_blend1.save(f"{save_dir_}/align_{i:02d}/05_blend1_pano_rgb_inpainted.png")
-        pano_blend2.save(f"{save_dir_}/align_{i:02d}/05_blend2_pano_rgb_inpainted.png")
-
-        pano_rgb_inpainted = pano_blend2
-        pano_rgb_inpainted.save(f"{save_dir_}/align_{i:02d}/06_pano_rgb_inpainted.png") #TODO: this is the same as blend2. Remove repetition
-
-        # 8. Estimate depth
-        # TODO: (Antoine, 16 OCT) LayerPANO3D Has a depth inpainting model, which may be better than this + harmonic blending. Worth testing.)
-        if not skip_inpainting:
-            depth_estimated = spherical_dreamer.estimate_pano_depth(
-                pano_rgb=np.array(pano_rgb_inpainted)
+            pts2_carte = my_utils.depth2cam_carte(
+                depth=depth2,
+                sphere_radius=sphere_radius,
+                height=height,
+                width=width,
+            ) 
+            pts2_carte_corrected, colors2_corrected = my_utils.run_corrective_pipeline_on_sphere(
+                pts2_carte, 
+                colors2, 
+                height, width, 
+                **sphere_correction_kwargs
             )
-            np.save(f"{save_dir_}/align_{i:02d}/XX_estimated_depth.npy", depth_estimated)
-        else:
-            depth_estimated = np.load(f"{save_dir_}/align_{i:02d}/XX_estimated_depth.npy")
-        # depth_estimated=np.ones_like(depth_estimated) * sphere_radius  
-        # print("WARNING: estimated depth override to ones for debugging purposes")
-        my_utils.depth_numpy_to_PIL(depth_estimated).save(f"{save_dir_}/align_{i:02d}/07_estimated_depth.png")
-        my_utils.depth_numpy_to_figure(depth_estimated).savefig(f"{save_dir_}/align_{i:02d}/07_estimated_depth_figure.png")
+            
+            sphere2 = my_utils.Sphere(
+                None, pts2_carte_corrected, colors2_corrected, 
+                forward_carte=translation_direction,
+                opening_kwargs=opening_kwargs,
+            )
 
-        # 9. Align (Blend) depth
-        new_colors = (np.array(pano_rgb_inpainted)/255.0)
+            # 2. Move camera
+            pose2 = my_utils.camera_translation(pose1, delta_walk * translation_direction)
+            sphere2.update_pose(pose2)
+            
+            print('Loaded and opened sphere!')
 
-        # (Naive blending)
-        # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
-        pcd_naive, blended_depth_naive = naive_blend_of_depths(
-            colors=new_colors,
-            warped_depth_interp=warped_depth_interp,
-            depth_estimated=depth_estimated,
-            missing_info_mask=missing_info_mask,
-            pose=pose_intermediate,
-            sphere_radius=sphere_radius,
-            height=height,
-            width=width,
-            logging=True
-        )
+            # 3. Go to intermediate camera (between cam1 and cam2)
+            pose_intermediate = my_utils.camera_translation(pose2, -delta_walk/2 * translation_direction)
+            pose_intermediate_bis = my_utils.camera_translation(pose1, delta_walk/2 * translation_direction)
+            
+            assert np.allclose(pose_intermediate, pose_intermediate_bis), "Error in camera intermediate pose computation"
+            pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, raise_intermediate_camera_by_z]))
 
-        # (Harmonic blending)
-        pts_deformed_world, new_colors, pcd_harmonic, blended_depth_harmonic = harmonic_blend_of_depths(
-            colors=new_colors,
-            warped_depth_interp=warped_depth_interp,
-            depth_estimated=depth_estimated,
-            missing_info_mask=missing_info_mask,
-            pose=pose_intermediate,
-            sphere_radius=sphere_radius,
-            height=height,
-            width=width,
-            logging=True
-        )
-        pointclouds[f"inpaint_{i:02d}"] = {}
-        pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
-        pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
-        pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
-            pts=pts_deformed_world,
-            colors=new_colors
-        )
+            # 4, 5, 6, 7, 8, 9: Generate missing points from pose, inpaint, estimate depth (inside function below)
+            new_pts, new_colors, pcd_naive, pcd_harmonic = generate_missing_points_from_pose(
+                current_points=np.concatenate((
+                    sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
+                ), axis=0),
+                current_colors=np.concatenate((
+                    sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
+                ), axis=0),
+                camera_pose=pose_intermediate,
+                skip_inpainting=skip_inpainting,
+                height=height,
+                width=width,
+                where_save=save_dir__,
+            )
+            pointclouds[f"inpaint_{i:02d}"] = {}
+            pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
+            pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
+            pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
+                pts=new_pts,
+                colors=new_colors
+            )
 
-        # Add new points to their corresponding spheres.
-        # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
-        (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
-            pts_deformed_world, new_colors, pose1, pose2, translation_direction
-        )
-        sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
-        sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
+            # 10. Add new points to their corresponding spheres.
+            # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
+            (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
+                new_pts, new_colors, pose1, pose2, translation_direction
+            )
+            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
+            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
 
-        # 10. Add all new points to world points, including inpainted+deformed points and points from the current dream.
-        pointclouds[f'dream_{i:02d}'] = {}
-        pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
-        pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
+            # Add all new points to world points, including inpainted+deformed points and points from the current dream.
+            pointclouds[f'dream_{i:02d}'] = {}
+            pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
+            pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
+            
+            #10.a Points from sphere1
+            if i == 1: # first iteration: sphere1 only has right opened
+                pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
+            else: # later iterations: sphere1 has both opened
+                pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
+            #10.b Neutral points
+            all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
+            all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
+            #10.c Points from sphere2 (only last iter)
+            if i == num_dreams - 1: 
+                pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
+                assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
+
+            # 11. Log final pointcloud
+            pointclouds[f"dream_{i:02d}"][f"total"] = my_utils.PointCloud(
+                pts=all_pts_world,
+                colors=all_colors_world
+            )
+
+            # 12. Adjust sphere1 to be sphere2 for next iteration
+            sphere1 = sphere2
+            pose1 = pose2
+
+            # save pcd
+            with open(os.path.join(save_dir_, "pointclouds_zoo.pkl"), 'wb') as f:
+                pkl.dump(pointclouds, f)
+
+        # END OF PHASE II: final pcd save
+        with open(os.path.join(save_dir_, "raw_dream_pcd.pkl"), 'wb') as f:
+            pkl.dump(
+                my_utils.PointCloud(
+                    pts=all_pts_world,
+                    colors=all_colors_world
+                ), f)
+    else:
+        with open(os.path.join(save_dir_, "raw_dream_pcd.pkl"), 'rb') as f:
+            raw_pcd = pkl.load(f)
+        all_pts_world = raw_pcd.pts
+        all_colors_world = raw_pcd.colors
         
-        #10.a Points from sphere1
-        if i == 1: # first iteration: sphere1 only has right opened
-            pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
-            all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
-            all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
-        else: # later iterations: sphere1 has both opened
-            pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
-            all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
-            all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
-        #10.b Neutral points
-        all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
-        all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
-        #10.c Points from sphere2 (only last iter)
-        if i == num_dreams - 1: 
-            pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
-            all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
-            all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
+    # --- args PHASE II ---
+    world_correction_kwargs = {
+        "correct_depth": False,
+        "near": NEAR,
+        "far": FAR,
+        "correct_walls": False,
+        "correct_floor": True,
+        "depth_threshold_for_floor_correction": 1.0,
+        "remove_outliers": False,
+    }
+    # --- end args PHASE II ---
 
-        # 11. Log final pointcloud
-        pointclouds[f"dream_{i:02d}"][f"total"] = my_utils.PointCloud(
-            pts=all_pts_world,
-            colors=all_colors_world
+    # PHASE II. POST PROCESSING OF THE FINAL POINTCLOUD WITH WORLD CORRECTION + HOLE FILLING
+    all_pts_world, all_colors_world = my_utils.run_corrective_pipeline_on_world(
+        pts=all_pts_world,
+        colors=all_colors_world,
+        pose_left=pose_init,
+        pose_right=pose_end,
+        translation_direction=translation_direction,
+        verbose=True,
+        plot=True,
+        **world_correction_kwargs
+    )
+
+    for i, cam_pose in enumerate(my_utils.get_intermediate_camera_poses(
+        start_pose=pose_init,
+        end_pose=pose_end,
+        num_steps=10,
+        perturb_y=0.0,
+        perturb_z=0.0, 
+        perturb_x=0.0,
+    )): #TODO: this function does not really do what I currently want, as pertub is added randomly to each indermediate camera. Ideally I would want something dense.
+        save_dir__ = os.path.join(save_dir_, f"final_filling_{i:03d}")
+        os.makedirs(save_dir__, exist_ok=True)
+        print(f"--- Final Filling from new camera pose ---")
+        new_pts, new_colors, pcd_naive, pcd_harmonic = generate_missing_points_from_pose(
+            all_pts_world, 
+            all_colors_world, 
+            my_utils.camera_translation(cam_pose, 0.0 * np.array([0, 0, 1])), # when correcting the floor enforcing z=0, you want to raise the camera a bit
+            height,
+            width,
+            skip_inpainting=skip_filling, 
+            where_save=save_dir__
         )
+        all_pts_world = np.concatenate((all_pts_world, new_pts), axis=0)
+        all_colors_world = np.concatenate((all_colors_world, new_colors), axis=0)
 
-        # 12. Adjust sphere1 to be sphere2 for next iteration
-        sphere1 = sphere2
-        pose1 = pose2
 
-        # save pcd
-        with open(f"{save_dir_}/pointclouds.pkl", 'wb') as f:
-            pkl.dump(pointclouds, f)
+    final_pcd = my_utils.PointCloud(
+        pts=all_pts_world,
+        colors=all_colors_world
+    )
+    with open(os.path.join(save_dir_, "final_dream_pcd.pkl"), 'wb') as f:
+        pkl.dump(final_pcd, f)
 
     print("PYTHON SCRIPT SUCCESSFULLY RUN TO THE END !")
