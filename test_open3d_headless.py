@@ -67,7 +67,7 @@ def set_camera_from_elev_azim(scene_camera,
     scene_camera.look_at(lookat, cam_pos, up)
 
 
-expname = '31_forest'
+expname = '32_forest'
 num_dreams = 3
 sphere_radius = 1.0
 max_x = (num_dreams-1) * sphere_radius * np.pi/2
@@ -201,6 +201,6 @@ for azim_deg in np.linspace(0, 360, num=20, endpoint=False):
 
     # Render to image and save
     img = renderer.render_to_image()
-    out_path = f"TEST_O3D_RENDERING/{expname}__point_size={point_size}__azim={azim_deg:.1f}__rm_outlier={remove_outliers}.png"
+    out_path = f"OUTPUTS/test_o3d_rendering/{expname}__point_size={point_size}__azim={azim_deg:.1f}__rm_outlier={remove_outliers}.png"
     o3d.io.write_image(out_path, img)
     print(f"Saved headless render to {out_path}")

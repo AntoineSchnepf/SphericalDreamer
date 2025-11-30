@@ -220,15 +220,33 @@ def depth_numpy_to_PIL(depth):
 
 def numpy_to_PIL(image):
     """
-    Convert a numpy array to a PIL Image. Automatically converts to RGB or Gray-Scale PIL Images.
+    Convert a numpy array to a PIL Image.
+    Handles NaNs safely by replacing them with 0 before uint8 conversion.
+
+    Supports:
+        - Grayscale 2D arrays
+        - (H, W, 1)
+        - (H, W, 3) RGB arrays
     """
-    if image.ndim == 2 :
-        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
-    elif image.shape[2] == 1:
-        assert image.ndim == 3
-        return Image.fromarray(np.uint8(image * 255.0)).convert('L')
+    image = np.asarray(image)
+
+    # Replace NaN with 0 (black). You can choose another fill value if you prefer.
+    safe_img = np.nan_to_num(image, nan=0.0, posinf=1.0, neginf=0.0)
+
+    # Normalize to uint8 range
+    safe_img = np.clip(safe_img * 255.0, 0, 255).astype(np.uint8)
+
+    if image.ndim == 2:
+        return Image.fromarray(safe_img, mode='L')
+
+    elif image.ndim == 3 and image.shape[2] == 1:
+        return Image.fromarray(safe_img[..., 0], mode='L')
+
+    elif image.ndim == 3 and image.shape[2] == 3:
+        return Image.fromarray(safe_img, mode='RGB')
+
     else:
-        return Image.fromarray(np.uint8(image * 255.0)).convert('RGB')
+        raise ValueError("Unsupported image shape for PIL conversion:", image.shape)
 
 def PIL_to_numpy(pil_img):
     """
@@ -838,6 +856,9 @@ class Sphere:
         A sphere has a forward direction, which can be expressed in spherical coordinates or cartesian coordinates
         """
         assert (forward_sph is not None) or (forward_carte is not None), "Error: forward direction must be provided in either spherical or cartesian coordinates"
+        assert pts_carte.shape[-1] == 3, "Error: pts_carte must have shape [N, 3]"
+        assert colors.shape[-1] == 3, "Error: colors must have shape [N, 3]"
+        assert pts_carte.reshape(-1, 3).shape[0] == colors.reshape(-1, 3).shape[0], "Error: pts_carte and colors must have the same number of points"
         self.forward_sph = forward_sph if forward_sph is not None else carte2sph_3D(forward_carte)
         self.forward_carte = forward_carte if forward_carte is not None else sph2carte_3D(forward_sph)
         self.opening_kwargs = opening_kwargs

@@ -484,6 +484,8 @@ def generate_missing_points_from_pose(
         height,
         width,
         skip_inpainting, 
+        upsampling_factor,
+        prompt,
         where_save=None
     ):
 
@@ -569,6 +571,21 @@ def generate_missing_points_from_pose(
     # 9. Blend depth
     new_colors = (np.array(pano_rgb_inpainted)/255.0)
 
+    # Optional upsampling to improve pcd density
+    if np.any(where_depth_nan & (~missing_info_mask)):
+        print("IMPORTANT WARNING: depth has NaNs in non-missing info regions!")
+    if upsampling_factor > 1:
+        new_colors = opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        warped_depth_interp = opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="nearest")
+        depth_estimated = opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        missing_info_mask = mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
+
+        # sanity check
+        where_depth_nan_resized = np.isnan(warped_depth_interp)
+        if np.any(where_depth_nan_resized & (~missing_info_mask)):
+            print("IMPORTANT WARNING: resized depth has NaNs in non-missing info regions!")
+
+
     # (Naive blending)
     # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
     pcd_naive, blended_depth_naive = naive_blend_of_depths(
@@ -578,8 +595,8 @@ def generate_missing_points_from_pose(
         missing_info_mask=missing_info_mask,
         pose=camera_pose,
         sphere_radius=sphere_radius,
-        height=height,
-        width=width,
+        height=height*upsampling_factor,
+        width=width*upsampling_factor,
         logging=True,
         where_save=where_save
     )
@@ -592,26 +609,42 @@ def generate_missing_points_from_pose(
         missing_info_mask=missing_info_mask,
         pose=camera_pose,
         sphere_radius=sphere_radius,
-        height=height,
-        width=width,
+        height=height*upsampling_factor,
+        width=width*upsampling_factor,
         logging=True,
         where_save=where_save
     )
 
     return pts_deformed_world, new_colors, pcd_naive, pcd_harmonic
 
+def opencv_resize(img, new_h, new_w, mode='bilinear'):
+    import cv2
+    """Resize using OpenCV for potentially better performance."""
+    if mode == 'bilinear':
+        interp = cv2.INTER_LINEAR
+    elif mode == 'nearest':
+        interp = cv2.INTER_NEAREST
+    else:
+        raise ValueError("Unsupported mode: choose 'nearest' or 'bilinear'")
+    resized_img = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    return resized_img
+
+def mask_resize(mask, new_h, new_w):
+    """Resize a binary mask using nearest neighbor interpolation."""
+    return opencv_resize(mask.astype(np.uint8), new_h, new_w, mode="nearest").astype(bool)
 
 if __name__ == "__main__":
     # ---- args ----
     debug = False
-    skip_phase0 = True
-    skip_inpainting = False
+    skip_phase0 = False
     skip_phase1 = False
-    skip_filling=False
+    skip_phase2 = True
+    skip_phase1_inpainting = False
+    skip_phase2_inpainting= False
     save_dir = "OUTPUTS/SphericalDreamerRecurse"
 
     # dreaming args
-    num_dreams = 3
+    num_dreams = 4
     translation_direction = my_utils.get_norm_vector(np.array([1, 0, 0], dtype=np.float32))
     sphere_radius = 1.0
     depth_model = "360mono"  # "360mono" or "egformer"
@@ -619,6 +652,7 @@ if __name__ == "__main__":
     NEAR=0.01
     delta_walk = FAR * np.pi / 2
     raise_intermediate_camera_by_z = 0.3    
+    pcd_upsampling_factor = 2 # int
     override_with_inpaint=False
     if depth_model == 'egformer':
         width = 1024
@@ -628,18 +662,18 @@ if __name__ == "__main__":
         height = 720
     seeds = [119224, 119224+9, 119224+20, 119224+33, 119224+45]
     prompts = [
-        "A realistic illustration of a college campus. In the middle ground, several academic buildings with brick facades and large windows stand prominently. In the background, a bright blue sky with scattered clouds stretches across the scene. In the foreground, a few elements commonly found on campus, such as students walking, bicycles parked along a path, and a grassy lawn with trees, add depth and life to the scene.",
-        "A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.",
         "A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.",
+        "A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.",
         "A bustling city street at night, neon lights reflecting on wet pavement, realism style.",
         # "Sandy beach, large driftwood in the foreground, calm sea beyond, realism style.",
+        # "A realistic illustration of a college campus. In the middle ground, several academic buildings with brick facades and large windows stand prominently. In the background, a bright blue sky with scattered clouds stretches across the scene. In the foreground, a few elements commonly found on campus, such as students walking, bicycles parked along a path, and a grassy lawn with trees, add depth and life to the scene.",
         # "A wide field under daylight, covered in lush green grass with worn paths where the grass has been trampled by many footsteps. In the center of the field stands a large concert stage, decorated with bold triangular patterns. On the stage rests a single guitar, but no performers are present. In front of the stage, a lively crowd gathers, waiting for the show to begin."
     ]
     expnames=[
-        "31_campus",
-        "31_seaside",
-        "31_forest",
-        "31_city",
+        "33_forest",
+        "33_seaside",
+        "33_city",
+        # "32_campus",
     ]
     indoor_or_outdoor_list = [
         'outdoor',
@@ -650,10 +684,10 @@ if __name__ == "__main__":
     # ---------------
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=2)
-    if True:
+    parser.add_argument('--exp_id', type=int, help='Experiment ID to run (0-4)', default=0)
+    if debug:
         args = parser.parse_args([
-            '--exp_id', '2'
+            '--exp_id', '1'
         ])
         for _ in range(10):
             print(f"/!\ DEBUG MODE IS ON. Running exp {args.exp_id}/!\ ")
@@ -728,16 +762,23 @@ if __name__ == "__main__":
             dream=0,
             save_dir_=save_dir_
         )
+
+        # Optional upsampling step to increase pointcloud density
+        if pcd_upsampling_factor>1:
+            colors1 = opencv_resize(colors1, height*2, width*2, mode='bilinear')
+            depth1 = opencv_resize(depth1, height*2, width*2, mode='bilinear')
+
         pts1_carte = my_utils.depth2cam_carte(
             depth=depth1,
             sphere_radius=sphere_radius,
-            height=height,
-            width=width,
+            height=height*pcd_upsampling_factor,
+            width=width*pcd_upsampling_factor,
         )
         pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
             pts1_carte, # in cartesian coordinates
             colors1, 
-            height, width, 
+            height*pcd_upsampling_factor,
+            width*pcd_upsampling_factor, 
             **sphere_correction_kwargs
         )
         sphere1 = my_utils.Sphere(
@@ -759,16 +800,22 @@ if __name__ == "__main__":
                 dream=i,
                 save_dir_=save_dir_
             )
+            # Optional upsampling step to increase pointcloud density
+            if pcd_upsampling_factor>1:
+                colors2 = opencv_resize(colors2, height*2, width*2, mode='bilinear')
+                depth2 = opencv_resize(depth2, height*2, width*2, mode='bilinear')
+
             pts2_carte = my_utils.depth2cam_carte(
                 depth=depth2,
                 sphere_radius=sphere_radius,
-                height=height,
-                width=width,
+                height=height*pcd_upsampling_factor,
+                width=width*pcd_upsampling_factor,
             ) 
             pts2_carte_corrected, colors2_corrected = my_utils.run_corrective_pipeline_on_sphere(
                 pts2_carte, 
                 colors2, 
-                height, width, 
+                height*pcd_upsampling_factor, 
+                width*pcd_upsampling_factor, 
                 **sphere_correction_kwargs
             )
             
@@ -800,18 +847,20 @@ if __name__ == "__main__":
                     sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
                 ), axis=0),
                 camera_pose=pose_intermediate,
-                skip_inpainting=skip_inpainting,
+                skip_inpainting=skip_phase1_inpainting,
                 height=height,
                 width=width,
+                upsampling_factor=pcd_upsampling_factor,
+                prompt=prompt,
                 where_save=save_dir__,
             )
-            pointclouds[f"inpaint_{i:02d}"] = {}
-            pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
-            pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
-            pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
-                pts=new_pts,
-                colors=new_colors
-            )
+            # pointclouds[f"inpaint_{i:02d}"] = {}
+            # pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
+            # pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
+            # pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
+            #     pts=new_pts,
+            #     colors=new_colors
+            # )
 
             # 10. Add new points to their corresponding spheres.
             # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
@@ -822,17 +871,17 @@ if __name__ == "__main__":
             sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
 
             # Add all new points to world points, including inpainted+deformed points and points from the current dream.
-            pointclouds[f'dream_{i:02d}'] = {}
-            pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
-            pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
+            # pointclouds[f'dream_{i:02d}'] = {}
+            # pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
+            # pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
             
             #10.a Points from sphere1
             if i == 1: # first iteration: sphere1 only has right opened
-                pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
+                # pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
                 all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
             else: # later iterations: sphere1 has both opened
-                pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
+                # pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
                 all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
             #10.b Neutral points
@@ -840,16 +889,16 @@ if __name__ == "__main__":
             all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
             #10.c Points from sphere2 (only last iter)
             if i == num_dreams - 1: 
-                pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
+                # pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
                 all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
                 assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
 
             # 11. Log final pointcloud
-            pointclouds[f"dream_{i:02d}"][f"total"] = my_utils.PointCloud(
-                pts=all_pts_world,
-                colors=all_colors_world
-            )
+            # pointclouds[f"dream_{i:02d}"][f"total"] = my_utils.PointCloud(
+            #     pts=all_pts_world,
+            #     colors=all_colors_world
+            # )
 
             # 12. Adjust sphere1 to be sphere2 for next iteration
             sphere1 = sphere2
@@ -871,60 +920,69 @@ if __name__ == "__main__":
             raw_pcd = pkl.load(f)
         all_pts_world = raw_pcd.pts
         all_colors_world = raw_pcd.colors
-        
-    # --- args PHASE II ---
-    world_correction_kwargs = {
-        "correct_depth": False,
-        "near": NEAR,
-        "far": FAR,
-        "correct_walls": False,
-        "correct_floor": True,
-        "depth_threshold_for_floor_correction": 1.0,
-        "remove_outliers": False,
-    }
-    # --- end args PHASE II ---
 
-    # PHASE II. POST PROCESSING OF THE FINAL POINTCLOUD WITH WORLD CORRECTION + HOLE FILLING
-    all_pts_world, all_colors_world = my_utils.run_corrective_pipeline_on_world(
-        pts=all_pts_world,
-        colors=all_colors_world,
-        pose_left=pose_init,
-        pose_right=pose_end,
-        translation_direction=translation_direction,
-        verbose=True,
-        plot=True,
-        **world_correction_kwargs
-    )
+    del pointclouds
 
-    for i, cam_pose in enumerate(my_utils.get_intermediate_camera_poses(
-        start_pose=pose_init,
-        end_pose=pose_end,
-        num_steps=10,
-        perturb_y=0.0,
-        perturb_z=0.0, 
-        perturb_x=0.0,
-    )): #TODO: this function does not really do what I currently want, as pertub is added randomly to each indermediate camera. Ideally I would want something dense.
-        save_dir__ = os.path.join(save_dir_, f"final_filling_{i:03d}")
-        os.makedirs(save_dir__, exist_ok=True)
-        print(f"--- Final Filling from new camera pose ---")
-        new_pts, new_colors, pcd_naive, pcd_harmonic = generate_missing_points_from_pose(
-            all_pts_world, 
-            all_colors_world, 
-            my_utils.camera_translation(cam_pose, 0.0 * np.array([0, 0, 1])), # when correcting the floor enforcing z=0, you want to raise the camera a bit
-            height,
-            width,
-            skip_inpainting=skip_filling, 
-            where_save=save_dir__
+    print("PHASE 1 SUCCESSFULLY COMPLETED!")
+
+    if not skip_phase2:
+        print("BEGINNING PHASE 2 ...")
+        # --- args PHASE II ---
+        world_correction_kwargs = {
+            "correct_depth": False,
+            "near": NEAR,
+            "far": FAR,
+            "correct_walls": False,
+            "correct_floor": True,
+            "depth_threshold_for_floor_correction": 1.0,
+            "remove_outliers": False,
+        }
+        # --- end args PHASE II ---
+
+        # PHASE II. POST PROCESSING OF THE FINAL POINTCLOUD WITH WORLD CORRECTION + HOLE FILLING
+        all_pts_world, all_colors_world = my_utils.run_corrective_pipeline_on_world(
+            pts=all_pts_world,
+            colors=all_colors_world,
+            pose_left=pose_init,
+            pose_right=pose_end,
+            translation_direction=translation_direction,
+            verbose=True,
+            plot=True,
+            **world_correction_kwargs
         )
-        all_pts_world = np.concatenate((all_pts_world, new_pts), axis=0)
-        all_colors_world = np.concatenate((all_colors_world, new_colors), axis=0)
+
+        # TODO: Antoine, 16 Oct: REDO EVERYtHING BELOW. CURRENTLY IT;S BAD
+        for i, cam_pose in enumerate(my_utils.get_intermediate_camera_poses(
+            start_pose=pose_init,
+            end_pose=pose_end,
+            num_steps=10,
+            perturb_y=0.0,
+            perturb_z=0.0, 
+            perturb_x=0.0,
+        )): #TODO: this function does not really do what I currently want, as pertub is added randomly to each indermediate camera. Ideally I would want something dense.
+            save_dir__ = os.path.join(save_dir_, f"final_filling_{i:03d}")
+            os.makedirs(save_dir__, exist_ok=True)
+            print(f"--- Final Filling from new camera pose ---")
+            new_pts, new_colors, pcd_naive, pcd_harmonic = generate_missing_points_from_pose(
+                all_pts_world, 
+                all_colors_world, 
+                my_utils.camera_translation(cam_pose, 0.0 * np.array([0, 0, 1])), # when correcting the floor enforcing z=0, you want to raise the camera a bit
+                height,
+                width,
+                upsampling_factor=1,
+                prompt=prompt,
+                skip_inpainting=skip_phase2_inpainting, 
+                where_save=save_dir__
+            )
+            all_pts_world = np.concatenate((all_pts_world, new_pts), axis=0)
+            all_colors_world = np.concatenate((all_colors_world, new_colors), axis=0)
 
 
-    final_pcd = my_utils.PointCloud(
-        pts=all_pts_world,
-        colors=all_colors_world
-    )
-    with open(os.path.join(save_dir_, "final_dream_pcd.pkl"), 'wb') as f:
-        pkl.dump(final_pcd, f)
+        final_pcd = my_utils.PointCloud(
+            pts=all_pts_world,
+            colors=all_colors_world
+        )
+        with open(os.path.join(save_dir_, "final_dream_pcd.pkl"), 'wb') as f:
+            pkl.dump(final_pcd, f)
 
     print("PYTHON SCRIPT SUCCESSFULLY RUN TO THE END !")

@@ -2,7 +2,7 @@
 # Run multiple experiments for SphericalDreamer
 
 repo_dir="/home/a.schnepf/phd/SphericalDreamer"
-script="$repo_dir/spherical_independant_dreams.py"
+script="$repo_dir/dream.py"
 
 # Ensure the script exists
 if [ ! -f "$script" ]; then
