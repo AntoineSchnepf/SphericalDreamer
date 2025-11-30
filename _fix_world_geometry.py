@@ -74,7 +74,7 @@ def correct_walls_lp(x, y, p=6.0):
 if __name__ == "__main__":
 
     # --- parse args: which sphere to load --- #
-    expname = "24_forest"
+    expname = "31_forest"
     num_dreams = 5
     # ---------------------------------------- #
 

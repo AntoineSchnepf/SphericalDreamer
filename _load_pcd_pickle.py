@@ -6,7 +6,7 @@ import sys
 from IPython import get_ipython
 import matplotlib.pyplot as plt
 import pickle
-import my_utils
+from my_utils import PointCloud
 
 
 from PIL import Image
@@ -42,47 +42,59 @@ class PointCloud:
         pcd.colors = o3d.utility.Vector3dVector(self.colors[~nan_mask])
         return pcd
 
-expname = "26_city"
+
 
 
 if __name__ == "__main__":
 
     # -----------------------------------------
     # -- possible keys for pointclouds dict ---
-    to_load = {
-        # dream, state
-
-
-        # ('dream_00', 'init'),
-
-        # ('dream_01', 'init'),
-        # ('dream_01', 'open'),
-        # ('dream_01', 'blended_naive_w_excess'),
-        # ('dream_01', 'blended_harmonic_w_excess'),
-        # ('dream_01', 'blended_harmonic'),
-        # ('dream_01', 'total'),
-
-        # ('dream_02', 'open'),
-        # ('dream_02', 'blended_naive_w_excess'),
-        # ('dream_02', 'blended_harmonic_w_excess'),
-        # ('dream_02', 'blended_harmonic'),
-        # ('dream_02', 'total'),
-
-        ('dream_02', 'total'),
-    }
+    expname = "31_forest"
 
     # -------------------------------------------
 
 
-    save_dir = "../DATA/SphericalDreamerRecurse"
+    save_dir = "/Users/a.schnepf/Documents/code/phd/scene_gen/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse"
     save_dir_ = f"{save_dir}/{expname}"
 
     # open pickle file
-    filename = f"{save_dir_}/pointclouds.pkl"
+    pcd_to_load = [
+        "final_dream_pcd.pkl",
+        "raw_dream_pcd.pkl",
+        "pointclouds_zoo.pkl",
+    ][1]
+
+    filename = f"{save_dir_}/{pcd_to_load}"
     with open(filename, 'rb') as f:
         point_clouds = pickle.load(f)
 
-    pcds = []
-    for dream, state in to_load:
-        pcds.append(point_clouds[dream][state].get_o3d_pointcloud())
-    o3d.visualization.draw_geometries(pcds)
+    if pcd_to_load == "pointclouds_zoo.pkl":
+        to_load = {
+            # dream, state
+
+
+            # ('dream_00', 'init'),
+
+            # ('dream_01', 'init'),
+            # ('dream_01', 'open'),
+            # ('dream_01', 'blended_naive_w_excess'),
+            # ('dream_01', 'blended_harmonic_w_excess'),
+            # ('dream_01', 'blended_harmonic'),
+            # ('dream_01', 'total'),
+
+            # ('dream_02', 'open'),
+            # ('dream_02', 'blended_naive_w_excess'),
+            # ('dream_02', 'blended_harmonic_w_excess'),
+            # ('dream_02', 'blended_harmonic'),
+            # ('dream_02', 'total'),
+
+            # ('dream_02', 'total'),
+        }
+        pcds = []
+        for dream, state in to_load:
+            pcds.append(point_clouds[dream][state].get_o3d_pointcloud())
+        o3d.visualization.draw_geometries(pcds)
+
+    else:
+        pcd = point_clouds.get_o3d_pointcloud()
+        o3d.visualization.draw_geometries([pcd])
