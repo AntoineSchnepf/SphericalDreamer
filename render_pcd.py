@@ -234,6 +234,38 @@ def render_v0(all_pts_world, all_colors_world, pose, height, width):
 
     return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
 
+def render_perspective_v0(all_pts_world, all_colors_world, 
+                          pose, height, width, fx, fy, cx, cy,):
+
+    # World -> camera (Cartesian)
+    points_3D_cam_carte = my_utils.world2cam_carte_3D(all_pts_world, pose)  # (N,3)
+
+    # 3D -> perspective pixel coords + depth along the camera optical axis (+X)
+    coords_persp, depths_persp = my_utils.carte2persp_3D(
+        points_3D_cam_carte,
+        fx=fx,
+        fy=fy,
+        cx=cx,
+        cy=cy,
+    )  # (N,2)
+    coords_persp = coords_persp.astype(np.float32)
+    depths_persp = depths_persp.astype(np.float32)
+
+    # Splatting 
+    warped_img, warped_depth, visited_pixels = splat_with_z_buffer(
+        colors=all_colors_world,
+        depth_cam2=depths_persp,
+        coord_cam2=coords_persp,
+        height=height,
+        width=width,
+    )
+    
+    # Post-splatting interpolation
+    warped_img_interp, warped_depth_interp = interpolate_missing_pixels(
+        warped_img, warped_depth, visited_pixels,
+    )
+
+    return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
 
 # ---------------------- #
 # ----V1 of rendering--- # 
@@ -484,6 +516,53 @@ def render_v1(
 
     return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
 
+def render_perspective_v1(
+        all_pts_world, 
+        all_colors_world, 
+        pose, 
+        height, 
+        width,
+        fx, fy, cx, cy,
+        radius=1, 
+        depth_mode='exp', 
+        tau=0.05, 
+        spatial_mode='tent'
+    ):
+
+    # World -> camera (Cartesian)
+    points_3D_cam_carte = my_utils.world2cam_carte_3D(all_pts_world, pose)  # (N,3)
+
+    # 3D -> perspective pixel coords + depth along the camera optical axis (+X)
+    coords_persp, depths_persp = my_utils.carte2persp_3D(
+        points_3D_cam_carte,
+        fx=fx,
+        fy=fy,
+        cx=cx,
+        cy=cy,
+    )  # (N,2)
+    coords_persp = coords_persp.astype(np.float32)
+    depths_persp = depths_persp.astype(np.float32)
+
+    # Depth-weighted disk splatting
+    warped_img, warped_depth, visited_pixels = splat_with_weighted_disk(
+        colors=all_colors_world.astype(np.float32),
+        depths=depths_persp,
+        coords=coords_persp,
+        height=height,
+        width=width,
+        radius=radius,
+        spatial_mode=spatial_mode,
+        depth_mode=depth_mode,  # 'exp' | 'linear' | 'softmax'
+        tau=tau
+    )
+
+    # Post-splatting interpolation
+    warped_img_interp, warped_depth_interp = interpolate_missing_pixels(
+        warped_img, warped_depth, visited_pixels,
+    )
+
+    return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
+
 
 # ---------------------- #
 # ----V2 of rendering--- # 
@@ -515,7 +594,7 @@ def splat_with_modular_weighted_disk(
     eps=1e-8,
 ):
     """
-    Depth-aware, adaptive-radius point-cloud renderer (ERP space).
+    Depth-aware, adaptive-radius point-cloud renderer.
 
     Principle (3 passes):
       0) Z-buffer splat (no circle): project points, take nearest depth per pixel.
@@ -956,14 +1035,102 @@ def render_v2(
     # 3D -> camera spherical (your util). Depth is z in that space.
     points_3D_cam2_sph = my_utils.world2cam_sph_3D(all_pts_world, pose)   # (N,3)
     depths  = points_3D_cam2_sph[..., 2].astype(np.float32)               # (N,)
-    coords2 = points_3D_cam2_sph[..., :2]
-    coords  = my_utils.sph2erp_2D(coords2, height, width).astype(np.float32)  # (N,2)
+    coords_sph = points_3D_cam2_sph[..., :2]
+    coords_erp  = my_utils.sph2erp_2D(coords_sph, height, width).astype(np.float32)  # (N,2)
 
     # Call the zbuf->TV->adaptive renderer
     out = splat_with_modular_weighted_disk(
         colors=all_colors_world.astype(np.float32),
         depths=depths,
-        coords=coords,
+        coords=coords_erp,
+        height=height,
+        width=width,
+        R_tv=R_tv,
+        R_min=R_min,
+        R_max=R_max,
+        tv_lo=tv_lo,
+        tv_hi=tv_hi,
+        depth_mode=depth_mode,
+        tau=tau,
+        spatial_mode=spatial_mode,
+        spatial_sigma=spatial_sigma,
+        chunk_size=chunk_size,
+        return_depth=return_depth,
+        eps=eps,
+    )
+    warped_img = out["img"]
+    warped_depth = out["depth"]
+    visited_pixels = out["visited"]
+    warped_img_interp, warped_depth_interp = interpolate_missing_pixels(
+        warped_img, warped_depth, visited_pixels
+    )
+
+    if return_extra:
+        out["warped_img_interp"] = warped_img_interp
+        out["warped_depth_interp"] = warped_depth_interp
+        return out
+
+    return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
+
+def render_perspective_v2(
+    all_pts_world,         # (N,3) float32 world coordinates
+    all_colors_world,      # (N,3) float32 [0,1]
+    pose,                  # camera pose (as expected by my_utils)
+    height, width,
+    fx, fy, cx, cy,
+    # TV / radius controls
+    R_tv=2.0,                    # fixed circle for TV computation (hyperparameter)
+    R_min=1.0,                   # max radius used during final gather
+    R_max=2.0,
+    tv_lo=0.00,                  # TV where radius starts to grow
+    tv_hi=0.10,                  # TV where radius saturates at R_max
+    # weighting controls
+    depth_mode="exp",            # 'exp' | 'linear' | 'softmax'
+    tau=0.01,                    # depth scale for final occlusion
+    spatial_mode="tent",         # 'tent' | 'gauss'
+    spatial_sigma=None,          # used if 'gauss'
+    # perf / misc
+    chunk_size=200000,
+    return_depth=True,
+    eps=1e-8,
+    return_extra=False,
+):
+    """
+    Wrapper: world-space point cloud -> ERP coords + camera depth,
+    then run Pass0 (z-buffer), Pass1 (TV over fixed circle R_tv), Pass2 (adaptive gather).
+
+    Returns the same dict as splat_with_weighted_disk:
+        {
+          "img": (H,W,3) float32,            # final adaptive image
+          "depth": (H,W) float32 or None,    # final blended depth
+          "visited": (H,W) bool,             # pixels that received contributions
+          "Rmap": (H,W) float32,             # per-pixel adaptive radius
+          "tv": (H,W) float32,               # normalized local total variation
+          "zbuf_img": (H,W,3) float32,       # naive z-buffer image (pass 0)
+          "zbuf_depth": (H,W) float32,       # naive z-buffer depth (pass 0)
+          "zbuf_visited": (H,W) bool,        # visited mask for z-buffer pass
+        }
+    """
+
+    # World -> camera (Cartesian)
+    points_3D_cam_carte = my_utils.world2cam_carte_3D(all_pts_world, pose)  # (N,3)
+
+    # 3D -> perspective pixel coords + depth along the camera optical axis (+X)
+    coords_persp, depths_persp = my_utils.carte2persp_3D(
+        points_3D_cam_carte,
+        fx=fx,
+        fy=fy,
+        cx=cx,
+        cy=cy,
+    )  # (N,2)
+    coords_persp = coords_persp.astype(np.float32)
+    depths_persp = depths_persp.astype(np.float32)
+
+    # Call the zbuf->TV->adaptive renderer
+    out = splat_with_modular_weighted_disk(
+        colors=all_colors_world.astype(np.float32),
+        depths=depths_persp,
+        coords=coords_persp,
         height=height,
         width=width,
         R_tv=R_tv,
@@ -995,8 +1162,11 @@ def render_v2(
 
 
 
+
 if __name__ == "__main__":
-    expname = '24_campus'
+    expname = '31_forest'
+    test_rendering_eqr = False
+    test_rendering_perspective = True
     width = 1440
     height = 720
     sphere_radius = 1.0
@@ -1005,105 +1175,162 @@ if __name__ == "__main__":
     translation_direction = np.array([1,0,0])
     delta_walk =  sphere_radius * np.pi / 2
 
-    # load sphere1
-    colors1, depth1 = my_utils.load_rgbd_pano(dream=0,save_dir_=save_dir_)
-    pts1_cam_cartesian = my_utils.depth2cam_carte(
-        depth=depth1,
-        sphere_radius=sphere_radius,
-        height=height,
-        width=width,
-    ) # [H, W, 3]
     pose1 = np.array([[1.0, 0, 0, 0],
                       [0, 1.0, 0, 0],
                       [0, 0, 1.0, 0],
                       [0, 0, 0, 1.0]])
-    sphere1 = my_utils.Sphere(pose1, pts1_cam_cartesian, colors1, forward_carte=translation_direction)
-    
-    # load sphere2
-    colors2, depth2 = my_utils.load_rgbd_pano(dream=1,save_dir_=save_dir_)
-    pts2_cam_cartesian = my_utils.depth2cam_carte(
-        depth=depth2,
-        sphere_radius=sphere_radius,
-        height=height,
-        width=width,
-    ) # [H, W, 3]
     pose2 = my_utils.camera_translation(pose1, delta_walk * translation_direction)
-    sphere2 = my_utils.Sphere(pose2, pts2_cam_cartesian, colors2, forward_carte=translation_direction)
-
     pose_intermediate = my_utils.camera_translation(pose2, -delta_walk/2 * translation_direction)
+    
+
+    # # load sphere1
+    # colors1, depth1 = my_utils.load_rgbd_pano(dream=0,save_dir_=save_dir_)
+    # pts1_cam_cartesian = my_utils.depth2cam_carte(
+    #     depth=depth1,
+    #     sphere_radius=sphere_radius,
+    #     height=height,
+    #     width=width,
+    # ) # [H, W, 3]
+    # sphere1 = my_utils.Sphere(pose1, pts1_cam_cartesian, colors1, forward_carte=translation_direction)
+    
+    # # load sphere2
+    # colors2, depth2 = my_utils.load_rgbd_pano(dream=1,save_dir_=save_dir_)
+    # pts2_cam_cartesian = my_utils.depth2cam_carte(
+    #     depth=depth2,
+    #     sphere_radius=sphere_radius,
+    #     height=height,
+    #     width=width,
+    # ) # [H, W, 3]
+    # sphere2 = my_utils.Sphere(pose2, pts2_cam_cartesian, colors2, forward_carte=translation_direction)
+
+
+    pcd = my_utils.load_pcd(f"{save_dir_}/raw_dream_pcd.pkl")
+    
     render_kwargs = {
         "all_pts_world": np.concatenate((
-            sphere1.right_opened.get_world_pcd().pts,
-            sphere2.left_opened.get_world_pcd().pts
+            pcd.pts,
         ), axis=0),
 
         "all_colors_world": np.concatenate((
-            sphere1.right_opened.get_world_pcd().colors,
-            sphere2.left_opened.get_world_pcd().colors
+            pcd.colors,
         ), axis=0),
 
-        "pose": pose_intermediate,
+        "pose": pose2,
         "height": height,
         "width": width,
     }
-    t0 = time.time()
-    warped_img_v0, warped_depth_v0, warped_img_interp_v0, warped_depth_interp_v0, visited_pixels_v0 = render_v0(**render_kwargs)
-    t1 = time.time()
-    print(f"Render V0 Time: {t1 - t0:.4f} seconds")
-
-    t0 = time.time()
-    warped_img_v1, warped_depth_v1, warped_img_interp_v1, warped_depth_interp_v1, visited_pixels_v1 = render_v1(
-        **render_kwargs, 
-        radius=1.0,
-        depth_mode='exp', 
-        tau=0.05, 
-        spatial_mode='tent'
-    )
-    t1 = time.time()
-    print(f"Render V1 Time: {t1 - t0:.4f} seconds")
     
-    t0 = time.time()
-    res_v2 = render_v2(
-        **render_kwargs,                 
-        # TV / radius controls
-        R_tv=2.0,                         # fixed circle for TV computation (hyperparameter)
-        R_min=1.0,                   # max radius used during final gather
-        R_max=2.0,
-        tv_lo=0.00,                  # TV where radius starts to grow
-        tv_hi=0.30,                  # TV where radius saturates at R_max
-        # weighting controls
-        depth_mode="exp",            # 'exp' | 'linear' | 'softmax'
-        tau=0.01,                    # depth scale for final occlusion
-        spatial_mode="tent",         # 'tent' | 'gauss'
-        spatial_sigma=None,          # used if 'gauss'
-        # perf / misc
-        chunk_size=200000,
-        return_depth=True,
-        eps=1e-8,
-        return_extra=True
-    )
-    t1 = time.time()
-    print(f"Render V2 Time: {t1 - t0:.4f} seconds")
-    
-    warped_img_interp_v2, warped_depth_interp_v2 = res_v2["warped_img_interp"], res_v2["warped_depth_interp"]
-    # res = {
-    #     "img": img,
-    #     "depth": dep,
-    #     "visited": visited,
-    #     "Rmap": Rmap,
-    #     "tv": tv,
-    #     "zbuf_img": warped_img0,
-    #     "zbuf_depth": warped_depth0,
-    #     "zbuf_visited": visited0,
-    # }
+    if test_rendering_eqr:
+        
+        t0 = time.time()
+        warped_img_v0, warped_depth_v0, warped_img_interp_v0, warped_depth_interp_v0, visited_pixels_v0 = render_v0(**render_kwargs)
+        t1 = time.time()
+        print(f"Render V0 Time: {t1 - t0:.4f} seconds")
 
+        t0 = time.time()
+        warped_img_v1, warped_depth_v1, warped_img_interp_v1, warped_depth_interp_v1, visited_pixels_v1 = render_v1(
+            **render_kwargs, 
+            radius=1.0,
+            depth_mode='exp', 
+            tau=0.05, 
+            spatial_mode='tent'
+        )
+        t1 = time.time()
+        print(f"Render V1 Time: {t1 - t0:.4f} seconds")
+        
+        t0 = time.time()
+        res_v2 = render_v2(
+            **render_kwargs,                 
+            # TV / radius controls
+            R_tv=2.0,                         # fixed circle for TV computation (hyperparameter)
+            R_min=1.0,                   # max radius used during final gather
+            R_max=2.0,
+            tv_lo=0.00,                  # TV where radius starts to grow
+            tv_hi=0.30,                  # TV where radius saturates at R_max
+            # weighting controls
+            depth_mode="exp",            # 'exp' | 'linear' | 'softmax'
+            tau=0.01,                    # depth scale for final occlusion
+            spatial_mode="tent",         # 'tent' | 'gauss'
+            spatial_sigma=None,          # used if 'gauss'
+            # perf / misc
+            chunk_size=200000,
+            return_depth=True,
+            eps=1e-8,
+            return_extra=True
+        )
+        t1 = time.time()
+        print(f"Render V2 Time: {t1 - t0:.4f} seconds")
+        
+        warped_img_interp_v2, warped_depth_interp_v2 = res_v2["warped_img_interp"], res_v2["warped_depth_interp"]
+        warped_img_interp_v0 = my_utils.numpy_to_PIL(warped_img_interp_v0)
+        warped_img_interp_v1 = my_utils.numpy_to_PIL(warped_img_interp_v1)
+        warped_img_interp_v2 = my_utils.numpy_to_PIL(warped_img_interp_v2)
+        warped_depth_interp_v0=my_utils.numpy_to_PIL(warped_depth_interp_v0)
+        warped_depth_interp_v1=my_utils.numpy_to_PIL(warped_depth_interp_v1)
+        warped_depth_interp_v2=my_utils.numpy_to_PIL(warped_depth_interp_v2)
+        img_res = my_utils.tile_image([warped_img_interp_v0, warped_img_interp_v1, warped_img_interp_v2])
+        depth_res = my_utils.tile_image([warped_depth_interp_v0, warped_depth_interp_v1, warped_depth_interp_v2])
 
+    if test_rendering_perspective:
+        width = width // 2
+        height = height // 2
+        render_kwargs.update({
+            "fx": 800.0,
+            "fy": 800.0,
+            "cx": width / 2,
+            "cy": height / 2,
+            "width": width,
+            "height": height,
+        })
+        
+        
+        t0 = time.time()
+        warped_img_v0, warped_depth_v0, warped_img_interp_v0, warped_depth_interp_v0, visited_pixels_v0 = render_perspective_v0(**render_kwargs)
+        t1 = time.time()
+        print(f"Render V0 Time: {t1 - t0:.4f} seconds")
 
-    warped_img_interp_v0 = my_utils.numpy_to_PIL(warped_img_interp_v0)
-    warped_img_interp_v1 = my_utils.numpy_to_PIL(warped_img_interp_v1)
-    warped_img_interp_v2 = my_utils.numpy_to_PIL(warped_img_interp_v2)
-    warped_depth_interp_v0=my_utils.numpy_to_PIL(warped_depth_interp_v0)
-    warped_depth_interp_v1=my_utils.numpy_to_PIL(warped_depth_interp_v1)
-    warped_depth_interp_v2=my_utils.numpy_to_PIL(warped_depth_interp_v2)
-    img_res = my_utils.tile_image([warped_img_interp_v0, warped_img_interp_v1, warped_img_interp_v2])
-    depth_res = my_utils.tile_image([warped_depth_interp_v0, warped_depth_interp_v1, warped_depth_interp_v2])
+        t0 = time.time()
+        warped_img_v1, warped_depth_v1, warped_img_interp_v1, warped_depth_interp_v1, visited_pixels_v1 = render_perspective_v1(
+            **render_kwargs, 
+            radius=1.0,
+            depth_mode='exp', 
+            tau=0.05, 
+            spatial_mode='tent'
+        )
+        t1 = time.time()
+        print(f"Render V1 Time: {t1 - t0:.4f} seconds")
+        
+        t0 = time.time()
+        res_v2 = render_perspective_v2(
+            **render_kwargs,                 
+            # TV / radius controls
+            R_tv=2.0,                         # fixed circle for TV computation (hyperparameter)
+            R_min=1.0,                   # max radius used during final gather
+            R_max=2.0,
+            tv_lo=0.00,                  # TV where radius starts to grow
+            tv_hi=0.30,                  # TV where radius saturates at R_max
+            # weighting controls
+            depth_mode="exp",            # 'exp' | 'linear' | 'softmax'
+            tau=0.01,                    # depth scale for final occlusion
+            spatial_mode="tent",         # 'tent' | 'gauss'
+            spatial_sigma=None,          # used if 'gauss'
+            # perf / misc
+            chunk_size=200000,
+            return_depth=True,
+            eps=1e-8,
+            return_extra=True
+        )
+        t1 = time.time()
+        print(f"Render V2 Time: {t1 - t0:.4f} seconds")
+        
+        warped_img_interp_v2, warped_depth_interp_v2 = res_v2["warped_img_interp"], res_v2["warped_depth_interp"]
+        warped_img_interp_v0 = my_utils.numpy_to_PIL(warped_img_interp_v0)
+        warped_img_interp_v1 = my_utils.numpy_to_PIL(warped_img_interp_v1)
+        warped_img_interp_v2 = my_utils.numpy_to_PIL(warped_img_interp_v2)
+        warped_depth_interp_v0=my_utils.numpy_to_PIL(warped_depth_interp_v0)
+        warped_depth_interp_v1=my_utils.numpy_to_PIL(warped_depth_interp_v1)
+        warped_depth_interp_v2=my_utils.numpy_to_PIL(warped_depth_interp_v2)
+        img_res = my_utils.tile_image([warped_img_interp_v0, warped_img_interp_v1, warped_img_interp_v2])
+        depth_res = my_utils.tile_image([warped_depth_interp_v0, warped_depth_interp_v1, warped_depth_interp_v2])
+
+        img_res

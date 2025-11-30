@@ -814,7 +814,7 @@ if __name__ == "__main__":
             )
 
             # 10. Add new points to their corresponding spheres.
-        # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
+            # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
             (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
                 new_pts, new_colors, pose1, pose2, translation_direction
             )
@@ -872,19 +872,19 @@ if __name__ == "__main__":
         all_pts_world = raw_pcd.pts
         all_colors_world = raw_pcd.colors
         
-    # --- args PHASE III ---
+    # --- args PHASE II ---
     world_correction_kwargs = {
         "correct_depth": False,
-        "near": NEAR*2,
-        "far": FAR*2,
+        "near": NEAR,
+        "far": FAR,
         "correct_walls": False,
         "correct_floor": True,
         "depth_threshold_for_floor_correction": 1.0,
         "remove_outliers": False,
     }
-    # --- end args PHASE III ---
+    # --- end args PHASE II ---
 
-    # PHASE III. POST PROCESSING OF THE FINAL POINTCLOUD WITH WORLD CORRECTION + HOLE FILLING
+    # PHASE II. POST PROCESSING OF THE FINAL POINTCLOUD WITH WORLD CORRECTION + HOLE FILLING
     all_pts_world, all_colors_world = my_utils.run_corrective_pipeline_on_world(
         pts=all_pts_world,
         colors=all_colors_world,
@@ -895,7 +895,6 @@ if __name__ == "__main__":
         plot=True,
         **world_correction_kwargs
     )
-
 
     for i, cam_pose in enumerate(my_utils.get_intermediate_camera_poses(
         start_pose=pose_init,
