@@ -1,16 +1,12 @@
 import os
 import sys 
 import numpy as np
-import logging
 from PIL import Image
 import copy
 import matplotlib.pyplot as plt
 from scipy import ndimage
 import copy
 import cv2 
-from scipy.interpolate import griddata as interp_grid
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
 from sklearn.neighbors import kneighbors_graph, NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
 from scipy.sparse import diags
@@ -18,6 +14,111 @@ from scipy.sparse.linalg import cg, splu
 import time
 from scipy.interpolate import RegularGridInterpolator
 import pickle
+import yaml
+import sys
+import collections.abc
+from prodict import Prodict
+import argparse
+import pyfiglet
+# -------------------------------------------- #
+# --------------- Config utils ---------------- #
+# -------------------------------------------- #
+
+def deep_update(source, overrides):
+    """
+    Update a nested dictionary or similar mapping.
+    Modify ``source`` in place.
+    """
+    for key, value in overrides.items():
+        assert key in source.keys(), f"key {key} not in source"
+        if isinstance(value, collections.abc.Mapping) and value:
+            returned = deep_update(source.get(key, {}), value)
+            source[key] = returned
+        else:
+            source[key] = overrides[key]
+
+    return source
+
+def yaml_load(cfg_name, load_dir):
+    config_path = os.path.join(load_dir, cfg_name)
+    with open(config_path, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    return config
+
+def load_config(cfg_name, load_dir, from_default=False, default_cfg_name='_default.yaml') :
+    """Load a configuration file. If from_default is True, load 
+    the default config and update it with the config file"""
+    
+    config = yaml_load(cfg_name, load_dir)
+
+    if from_default :
+        default_config = yaml_load(default_cfg_name, load_dir)
+        config = deep_update(default_config, config)
+
+    return config
+
+def save_config(config, cfg_name, save_dir) :
+    config_path = os.path.join(save_dir, cfg_name)
+    if isinstance(config, Prodict) :
+        config = Prodict.to_dict(config, is_recursive=True)
+    with open(config_path, 'w') as f:
+        yaml.dump(config, f)
+
+# Custom print function that lets you print with colors
+def printc(str, color=None):
+    """Print string with color"""
+    if color is None:
+        print(str)
+    else:
+        colors = {
+            "red": "\033[91m",
+            "green": "\033[92m",
+            "yellow": "\033[93m",
+            "blue": "\033[94m",
+            "magenta": "\033[95m",
+            "cyan": "\033[96m",
+            "white": "\033[97m",
+            "end": "\033[0m"
+        }
+        print(f"{colors[color]}{str}{colors['end']}")
+
+def fetch_config_via_parser(debug, debug_parser_override=[]):
+    repo_path = os.path.dirname(os.path.realpath(__file__))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default="_default.yaml")
+    parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+
+    # ---- script args ----
+    if debug:
+        debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
+        printc(debug_message, color="red")
+        args = parser.parse_args(debug_parser_override)
+    else:
+        args = parser.parse_args()
+
+    config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
+    return config
+
+def setup(config):
+    seeds = [config.seed + offset for offset in config.seed_offsets]
+    if config.depth_model == 'egformer':
+        width = 1024
+        height = 512
+        print("WARNING: EGFormer depth model selected: Forcing panorama resolution to 1024x512")
+    else:
+        width = config.width
+        height = config.height
+        
+    save_dir_ = f"{config.save_dir}/{config.expname}"
+    pose_init = np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ], dtype=np.float32)
+    translation_direction = np.array(config.translation_direction, dtype=np.float32)
+    pose_end = camera_translation(pose_init, config.delta_walk * translation_direction * (config.num_dreams-1))
+    return seeds, width, height, save_dir_, pose_init, pose_end, translation_direction
 
 # -------------------------------------------- #
 # ------ Classic Computer Vision utils ------- #
@@ -88,6 +189,20 @@ def seamless_blend(src, dst, mask):
     # Convert back to PIL
     return Image.fromarray(cv2.cvtColor(blended_cv, cv2.COLOR_BGR2RGB))
 
+def opencv_resize(img, new_h, new_w, mode='bilinear'):
+    """Resize using OpenCV for potentially better performance."""
+    if mode == 'bilinear':
+        interp = cv2.INTER_LINEAR
+    elif mode == 'nearest':
+        interp = cv2.INTER_NEAREST
+    else:
+        raise ValueError("Unsupported mode: choose 'nearest' or 'bilinear'")
+    resized_img = cv2.resize(img, (new_w, new_h), interpolation=interp)
+    return resized_img
+
+def mask_resize(mask, new_h, new_w):
+    """Resize a binary mask using nearest neighbor interpolation."""
+    return opencv_resize(mask.astype(np.uint8), new_h, new_w, mode="nearest").astype(bool)
 
 # ---------------------------- #
 # ------ Visualization ------- #
@@ -273,6 +388,7 @@ def overlay_mask(image, mask, alpha=0.5):
     - alpha: Transparency level of the overlay (0 = transparent, 1 = opaque)
     """
     # Ensure inputs are float and mask is boolean
+    image=np.nan_to_num(image, nan=0.0, posinf=1.0, neginf=0.0)
     image = image.astype(np.float32)
     mask = mask.astype(bool)
 
@@ -962,6 +1078,52 @@ class Sphere:
         self.pose = new_pose
         for state in [self.closed, self.both_opened, self.left_opened, self.right_opened]:
             state.update_pose(new_pose)
+
+    def save_dict(self, path):
+        """
+        Save the current Sphere to `path`, including metadata and base points/colors.
+        The different opened/closed states will be recomputed when loading.
+        """
+        data = {
+            "pose": self.pose,
+            "forward_sph": self.forward_sph,
+            "forward_carte": self.forward_carte,
+            "opening_kwargs": self.opening_kwargs,
+            "pts_carte": self.pts_carte,
+            "colors": self.colors,
+        }
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with open(path, "wb") as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    @staticmethod
+    def instanciate_from_saved_dict(path):
+        """
+        Load a Sphere previously saved with `saved_dict` and return an equivalent instance.
+        """
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+
+        # Handle possible older saves that might not have all keys
+        pose = data["pose"]
+        pts_carte = data["pts_carte"]
+        colors = data["colors"]
+        forward_sph = data.get("forward_sph", None)
+        forward_carte = data.get("forward_carte", None)
+        opening_kwargs = data.get("opening_kwargs", _default_opening_kwargs)
+
+        sphere = Sphere(
+            pose=pose,
+            pts_carte=pts_carte,
+            colors=colors,
+            forward_sph=forward_sph,
+            forward_carte=forward_carte,
+            opening_kwargs=opening_kwargs,
+        )
+        return sphere
 
 def camera_translation(pose, translation):
     """
@@ -2093,14 +2255,12 @@ def run_corrective_pipeline_on_sphere(
         correct_floor, 
         depth_threshold_for_floor_correction, 
         remove_sky, 
-        indoor_or_outdoor, 
         remove_outliers, 
         verbose=False,
         plot=False,
     ):
     "assunmes points in cartesian coordinates"
 
-    assert indoor_or_outdoor in ['indoor', 'outdoor', None], "indoor_or_outdoor must be either 'indoor' or 'outdoor'"
 
     # 1.  Convert to spherical coordinates
     final_pts = pts.copy()
@@ -2188,7 +2348,6 @@ def run_corrective_pipeline_on_sphere(
             print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
     
     return final_pts, colors
-
 
 def run_corrective_pipeline_on_world(
     pts, 

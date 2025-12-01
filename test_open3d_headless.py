@@ -67,8 +67,8 @@ def set_camera_from_elev_azim(scene_camera,
     scene_camera.look_at(lookat, cam_pos, up)
 
 
-expname = '32_forest'
-num_dreams = 3
+expname = '33_city'
+num_dreams = 4
 sphere_radius = 1.0
 max_x = (num_dreams-1) * sphere_radius * np.pi/2
 visualize_removed_points = False
@@ -95,7 +95,7 @@ if fix_world:
         "correct_depth": False,
         "near": NEAR,
         "far": FAR,
-        "correct_walls": False,
+        "correct_walls": True,
         "remove_outliers": False,
         "correct_floor": True,
         "depth_threshold_for_floor_correction": 1.0,
@@ -120,7 +120,7 @@ if fix_world:
         pose_right=pose_right,
         translation_direction=translation_direction,
         verbose=True,
-        plot=True,
+        plot=False,
         **world_correction_kwargs
     )
 
@@ -200,7 +200,9 @@ for azim_deg in np.linspace(0, 360, num=20, endpoint=False):
     # A bit of ambient light helps with meshes, but points are unlit; still set ambient
 
     # Render to image and save
+    where_save = os.path.join("OUTPUTS", "test_o3d_rendering", expname)
+    os.makedirs(where_save, exist_ok=True)
     img = renderer.render_to_image()
-    out_path = f"OUTPUTS/test_o3d_rendering/{expname}__point_size={point_size}__azim={azim_deg:.1f}__rm_outlier={remove_outliers}.png"
+    out_path = f"{where_save}/azim={azim_deg:.1f}__point_size={point_size}__rm_outlier={remove_outliers}.png"
     o3d.io.write_image(out_path, img)
     print(f"Saved headless render to {out_path}")

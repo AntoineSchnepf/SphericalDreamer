@@ -1,0 +1,414 @@
+import os
+import sys
+import cv2
+from matplotlib import image
+from src.pipeline_flux import FluxPipeline
+from src.pipeline_flux_fill import FluxFillPipeline
+from diffusers import FluxControlNetModel
+from diffusers.pipelines import FluxControlNetPipeline
+import torch
+import numpy as np
+from PIL import Image, ImageOps
+import copy
+from functools import partial
+from skimage.segmentation import find_boundaries
+from scipy.ndimage import maximum_filter, minimum_filter
+import logging
+import matplotlib.pyplot as plt
+import time
+import pickle as pkl
+import argparse
+from prodict import Prodict
+import pyfiglet
+# local imports
+_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
+sys.path.append(_360monodepth_install_dir) 
+from utils.depth_alignment import Pano_depth_estimation
+from render_pcd import render_v2
+import my_utils
+from sphericaldreamer import SphericalDreamer
+
+logging.disable(logging.CRITICAL + 1)
+
+
+def check_partition(*masks):
+    """Return True if masks are disjoint and cover the full image."""
+    # disjointness
+    total = np.zeros_like(masks[0], dtype=bool)
+    for m in masks:
+        if np.any(total & m):
+            return False
+        total |= m
+    # full coverage
+    return np.all(total)
+
+def get_harmonic_blending_mask(missing_info_mask):
+    """
+    missing_info_mask: np.array of shape [H, W] with dtype bool. True where info is missing i.e. where we inpainted
+    """
+    mask1 = ~missing_info_mask
+    mask2 = missing_info_mask
+    boundary = find_boundaries(mask1, mode='inner', background=False)  # [H, W]
+    mask1 = mask1 & (~boundary)
+    mask2 = mask2 & (~boundary)
+    assert check_partition(mask1, mask2, boundary), "Masks are not a valid partition of the image"
+    return mask1, mask2, boundary
+
+def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True, where_save=None):
+    """ Inputs are in HxW format except colors which is HxWx3 
+    Given the two depth map (interpolated and estimated), it merges with the following constraints:
+        - points in the good region of warped_depth_interp stay unchanged
+        - points in the missing region of warped_depth_interp are moved as little as possible to make it both continious and close to depth_estimated
+    Returns:
+        - pts2_deformed: np.array of shape [N, 3] in world coordinates of the points coming from depth_estimated, withing the inpainted region, after harmonic deformation
+        - colors2: np.array of shape [N, 3] with values in [0-1] corresponding to pts2_deformed
+        - pcd_harmonic: PointCloud object with the full blended pointcloud (More points than pts2_deformed, repetition with existing points)
+        - blended_depth_harmonic: np.array of shape [H, W] with the blended depth
+    """
+
+    def _log_masks(mask1, mask2, mask_boundary):
+        plt.figure(figsize=(12,4))
+        plt.subplot(1,3,1)
+        plt.imshow(mask1, cmap='gray')
+        plt.title("Mask 1 (good points)")
+        plt.subplot(1,3,2)
+        plt.imshow(mask2, cmap='gray')
+        plt.title("Mask 2 (to be deformed)")
+        plt.subplot(1,3,3)
+        plt.imshow(mask_boundary, cmap='gray')
+        plt.title("Mask boundary")
+        plt.savefig(os.path.join(where_save, "07_harmonic_blending_masks.png"))
+        plt.show()
+    
+    mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
+
+    all_pts_keep = my_utils.depth2world(
+        depth=warped_depth_interp, pose=pose, sphere_radius=sphere_radius, height=height, width=width
+    ) # here camera pose is not good maybe ??
+    all_pts_deform = my_utils.depth2world(
+        depth=depth_estimated, pose=pose, sphere_radius=sphere_radius, height=height, width=width
+    )
+    pts_keep = all_pts_keep[mask_keep] # these are already good
+    pts_target_boundary = all_pts_keep[mask_boundary] 
+    pts_deform_exb = all_pts_deform[mask_deform] # these need to be deformed by mooving the boundary points to the target boundary points
+    pts_deform_boundary = all_pts_deform[mask_boundary]
+    pts_deform = np.concatenate((pts_deform_exb, pts_deform_boundary), axis=0)
+    _mask_boundary = np.concatenate((np.zeros(pts_deform_exb.shape[0], dtype=bool), np.ones(pts_deform_boundary.shape[0], dtype=bool)), axis=0)
+
+    # Deformation
+    assert np.any(np.isnan(pts_deform)) == False, "Error: pts_deform contains NaNs"
+    assert np.any(np.isnan(pts_target_boundary)) == False, "Error: pts_target_boundary contains NaNs"
+    t0 = time.time()
+    pts_deformed, _ = my_utils.harmonic_deform_pipeline(
+        P=pts_deform,
+        mask_fixed=np.zeros(pts_deform.shape[0], dtype=bool),
+        mask_boundary=_mask_boundary,
+        target_boundary=pts_target_boundary,
+        n_coarse=10000,
+        every=5,
+        max_fixed=2000,
+        k=10, m=3
+    )
+    t1 = time.time()
+    print(f"Harmonic deformation took {t1 - t0:.1f}s")
+
+    pts_deformed_exb, pts_deformed_boundary = np.split(pts_deformed, [pts_deform_exb.shape[0]], axis=0)
+    pts_deformed = np.concatenate((pts_deformed_exb, pts_deformed_boundary), axis=0)
+    colors2_exb = colors[mask_deform]
+    colors2_boundary = colors[mask_boundary]
+    colors2 = np.concatenate((colors2_exb, colors2_boundary), axis=0)
+
+    # Visualization & pointcloud
+    if logging:
+        _log_masks(mask_keep, mask_deform, mask_boundary)
+        # TODO: What does the new spherical image looks like from pose ? With deformed points ?
+
+        # visualize blended depth and pointcloud from current camera
+        pts_3D_carte_new = np.zeros((height, width, 3), dtype=np.float32)
+        pts_3D_carte_new[mask_keep] = pts_keep
+        pts_3D_carte_new[mask_deform] = pts_deformed_exb
+        pts_3D_carte_new[mask_boundary] = pts_deformed_boundary
+        blended_depth_harmonic = my_utils.world2cam_sph_3D(pts_3D_carte_new, pose)[..., 2]
+        pcd_harmonic = my_utils.PointCloud(
+            pts=pts_3D_carte_new,
+            colors=colors
+        )
+
+        plt.figure()
+        plt.imshow(blended_depth_harmonic, cmap='plasma')
+        plt.colorbar()
+        plt.title('Blended Depth Harmonic')
+        plt.savefig(os.path.join(where_save, "08_blended_depth_harmonic.png"))
+        plt.show()
+
+        return pts_deformed, colors2, pcd_harmonic, blended_depth_harmonic
+
+    return pts_deformed, colors2
+
+def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=True, where_save=None):
+
+    if logging:
+
+        blended_depth = np.zeros_like(warped_depth_interp)
+        blended_depth[missing_info_mask] = depth_estimated[missing_info_mask]
+        blended_depth[~missing_info_mask] = warped_depth_interp[~missing_info_mask]
+
+        pcd_naive = my_utils.PointCloud(
+            pts=my_utils.depth2world(
+                depth=blended_depth, pose=pose, sphere_radius=sphere_radius, height=height, width=width
+            ),
+            colors=colors
+        )
+
+        plt.figure()
+        plt.imshow(blended_depth, cmap='plasma')
+        plt.colorbar()
+        plt.title('Blended Depth Naive')
+        plt.savefig(os.path.join(where_save, "08_blended_depth_naive.png"))
+        plt.show()
+
+    return pcd_naive, blended_depth
+
+def align_new_points(
+        warped_img_interp,
+        warped_depth_interp,
+        pano_rgb_inpainted,
+        depth_estimated,
+        missing_info_mask,
+        camera_pose, 
+        height,
+        width,
+        sphere_radius,
+        upsampling_factor,
+        where_save=None
+):
+    # 9. Blend depth
+    new_colors = (np.array(pano_rgb_inpainted)/255.0)
+
+    # Optional upsampling to improve pcd density
+    if upsampling_factor > 1:
+        new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="nearest")
+        depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
+
+        # sanity check
+        where_depth_nan_resized = np.isnan(warped_depth_interp)
+        if np.any(where_depth_nan_resized & (~missing_info_mask)):
+            print("IMPORTANT WARNING: resized depth has NaNs in non-missing info regions!")
+
+
+    # (Naive blending)
+    # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
+    pcd_naive, blended_depth_naive = naive_blend_of_depths(
+        colors=new_colors,
+        warped_depth_interp=warped_depth_interp,
+        depth_estimated=depth_estimated,
+        missing_info_mask=missing_info_mask,
+        pose=camera_pose,
+        sphere_radius=sphere_radius,
+        height=height*upsampling_factor,
+        width=width*upsampling_factor,
+        logging=True,
+        where_save=where_save
+    )
+
+    # (Harmonic blending)
+    pts_deformed_world, new_colors, pcd_harmonic, blended_depth_harmonic = harmonic_blend_of_depths(
+        colors=new_colors,
+        warped_depth_interp=warped_depth_interp,
+        depth_estimated=depth_estimated,
+        missing_info_mask=missing_info_mask,
+        pose=camera_pose,
+        sphere_radius=sphere_radius,
+        height=height*upsampling_factor,
+        width=width*upsampling_factor,
+        logging=True,
+        where_save=where_save
+    )
+
+    return pts_deformed_world, new_colors, pcd_naive, pcd_harmonic
+
+def split_new_points(pts, colors, pose1, pose2, forward):
+    # (Antoine, 16 Oct) This function will pose problems if we want to do anything different than a straight line path.
+    """
+    Split points between points belonging to sphere1, sphere2, and neutral points.
+    Points are distrbuted as follows:
+        - pts on the left side of cam1 belongs to sphere 1
+        - pts on the right side of cam2 belongs to sphere 2
+        - pts in between are neutral points
+    """
+    cam_loc_1 = pose1[:3, 3]
+    cam_loc_2 = pose2[:3, 3]
+    where_sphere1 = is_point_in_camera_forward_space(pts, cam_loc_1, -forward)  # left of cam1
+    where_sphere2 = is_point_in_camera_forward_space(pts, cam_loc_2, forward)   # right of cam2
+    where_neutral = ~(where_sphere1 | where_sphere2)
+    pts1, colors1 = pts[where_sphere1], colors[where_sphere1]
+    pts2, colors2 = pts[where_sphere2], colors[where_sphere2]
+    pts_neutral, colors_neutral = pts[where_neutral], colors[where_neutral]
+    return (pts1, colors1), (pts2, colors2), (pts_neutral, colors_neutral)
+
+def is_point_in_camera_forward_space(point_positions,
+                                    camera_position,
+                                    forward_vector,
+                                    tolerance=1e-12):
+    """
+    Determine whether one or more 3D points lie in the half-space
+    in front of the plane orthogonal to `forward_vector`
+    passing through `camera_position`.
+
+    Parameters
+    ----------
+    point_positions : array-like, shape (..., 3)
+        One or more 3D points. Supports arbitrary leading batch dimensions.
+    camera_position : array-like, shape (3,)
+        The 3D location of the camera.
+    forward_vector : array-like, shape (3,)
+        The camera's forward direction vector (does not need to be normalized).
+    tolerance : float, optional
+        Numerical tolerance for deciding whether a point on the plane counts as "in front".
+
+    Returns
+    -------
+    np.ndarray of bool
+        Boolean array of shape (...) — True for points in the camera’s forward half-space,
+        False for points behind it.
+    """
+
+    # Convert to arrays
+    point_positions = np.asarray(point_positions, dtype=float)
+    camera_position = np.asarray(camera_position, dtype=float)
+    forward_vector = np.asarray(forward_vector, dtype=float)
+
+    # Check that the forward vector is valid
+    if np.allclose(forward_vector, 0):
+        raise ValueError("forward_vector must be a non-zero vector.")
+
+    # Vector(s) from camera to point(s) – broadcasting works automatically
+    vectors_camera_to_points = point_positions - camera_position
+
+    # Signed distance(s) along the forward direction
+    signed_distances = np.sum(vectors_camera_to_points * forward_vector, axis=-1)
+
+    # True if in or beyond the forward half-space
+    return signed_distances >= -tolerance
+
+
+
+if __name__ == "__main__":
+    config = my_utils.fetch_config_via_parser(
+        debug=False, 
+        debug_parser_override=["--config", "forest.yaml"]
+    )
+    seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
+
+    spherical_dreamer = SphericalDreamer(
+        pano_width=width,
+        pano_height=height,
+        pano_depth_temp_dir='/tmp/pano_depth_temp',
+        depth_model=config.depth_model,
+    )
+
+    # -------------------------------------------------------------------- #
+    # ---- PHASE II.b ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING  ----- #
+    # -------------------------------------------------------------------- #
+    print(f"=== EXPERIMENT: {config.expname} ===")
+    if not config.skip_phase2b:
+        print(f"=== {config.expname}: PHASE II.b : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===")
+        # PHASE II.b: INIT
+        pointclouds = {}
+        all_pts_world = np.array([]).reshape(0, 3)
+        all_colors_world = np.array([]).reshape(0, 3)
+
+        # PHASE II.b: LOOP
+        for i in range(1, config.num_dreams):
+            print(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---")
+            save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
+
+            sphere1=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, "YY_sphere1.pkl"))
+            sphere2=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, "YY_sphere2.pkl"))
+            pose1=sphere1.pose
+            pose2=sphere2.pose
+
+            data = np.load(f"{save_dir__}/YY_other.npy", allow_pickle=True).item()
+
+            depth_estimated       = data['depth_estimated']
+            pose_intermediate     = data['pose_intermediate']
+            warped_img_interp     = data['warped_img_interp']
+            warped_depth_interp   = data['warped_depth_interp']
+            pano_rgb_inpainted    = data['pano_rgb_inpainted']
+            missing_info_mask     = data['missing_info_mask']
+
+            new_pts, new_colors, pcd_naive, pcd_harmonic = align_new_points(
+                warped_img_interp=warped_img_interp,
+                warped_depth_interp=warped_depth_interp,
+                pano_rgb_inpainted=pano_rgb_inpainted,
+                depth_estimated=depth_estimated,
+                missing_info_mask=missing_info_mask,
+                camera_pose=pose_intermediate, 
+                height=height,
+                width=width,
+                sphere_radius=config.sphere_radius,
+                upsampling_factor=config.pcd_upsampling_factor,
+                where_save=save_dir__
+            )
+            if config.phase2.excessive_pcd_logging:
+                pointclouds[f"inpaint_{i:02d}"] = {}
+                pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
+                pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
+                pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
+                    pts=new_pts,
+                    colors=new_colors
+                )
+
+            # 10. Add new points to their corresponding spheres.
+            # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
+            (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
+                new_pts, new_colors, pose1, pose2, translation_direction
+            )
+            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
+            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
+
+            # Add all new points to world points, including inpainted+deformed points and points from the current dream.
+            
+            if config.phase2.excessive_pcd_logging:
+                pointclouds[f'dream_{i:02d}'] = {}
+                pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
+                pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
+            
+            #10.a Points from sphere1
+            if i == 1: # first iteration: sphere1 only has right opened
+                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
+            else: # later iterations: sphere1 has both opened
+                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
+            #10.b Neutral points
+            all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
+            all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
+            #10.c Points from sphere2 (only last iter)
+            if i == config.num_dreams - 1: 
+                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
+                all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
+                assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
+
+
+            # save pcd
+            with open(os.path.join(save_dir_, "pointclouds_zoo.pkl"), 'wb') as f:
+                pkl.dump(pointclouds, f)
+
+        # END OF PHASE II: final pcd save
+        with open(os.path.join(save_dir_, "raw_dream_pcd.pkl"), 'wb') as f:
+            pkl.dump(
+                my_utils.PointCloud(
+                    pts=all_pts_world,
+                    colors=all_colors_world
+                ), f)
+
+
+        print("PHASE II.a SUCCESSFULLY COMPLETED!")
+    else:
+        print("=== SKIPPING PHASE II.a: ALIGN PAIRS + INPAINT ===")
