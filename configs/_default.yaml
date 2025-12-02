@@ -1,0 +1,68 @@
+# ---meta---
+expname: default_expname
+skip_phase1: False
+skip_phase2a: False
+skip_phase2b: False
+skip_phase3: False
+
+
+
+# ----- main args  -----
+num_dreams: 4
+prompt: "default prompt"
+width: 1440
+height: 720
+pcd_upsampling_factor: 4
+translation_direction: [1, 0, 0] # x, y, z
+delta_walk: 1.57
+raise_intermediate_camera_by_z: 0.3    
+
+geometry_correction:
+
+  sphere:
+    correct_depth: False
+    near: 0.1
+    far: 1.0
+    correct_walls: False
+    correct_floor: False
+    depth_threshold_for_floor_correction: 0.6
+    remove_sky: False
+    remove_outliers: True
+    verbose: False
+    plot: False
+
+  world:
+    correct_depth: False
+    near: 0.1
+    far: 1.0
+    correct_walls: False
+    correct_floor: True
+    depth_threshold_for_floor_correction: 1.0
+    remove_outliers: False
+
+world_opening:
+  opening_mode: cut+cylinder
+  delta_cut: 2.0943 # radians
+
+phase1: # panorama generation
+  override_with_inpaint: False
+
+phase2: # pairs of sphere inpainting + deformation
+  skip_inpainting: False
+  excessive_pcd_logging: False
+  rotate_intermediate_camera_by_deg: 0.0
+  rendering_version: 0 # 0, 1 or 2
+
+phase3: #  final hole filling
+  skip_inpainting: False 
+
+# tuned args
+depth_model: 360mono # in ['360mono', 'egformer']
+sphere_radius: 1.0
+
+# seeding
+seed: 119224
+seed_offsets: [0, 9, 20, 33, 45]
+
+# logging
+save_dir: OUTPUTS/SphericalDreamerRecurse

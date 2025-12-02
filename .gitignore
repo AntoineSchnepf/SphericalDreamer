@@ -7,3 +7,4 @@ tmp
 wandb
 submodules
 **.ply
+TEST_O3D_RENDERING/

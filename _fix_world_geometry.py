@@ -74,7 +74,7 @@ def correct_walls_lp(x, y, p=6.0):
 if __name__ == "__main__":
 
     # --- parse args: which sphere to load --- #
-    expname = "24_forest"
+    expname = "31_forest"
     num_dreams = 5
     # ---------------------------------------- #
 
@@ -90,8 +90,8 @@ if __name__ == "__main__":
     # --- script --- 
     width = 1440
     height = 720
-    NEAR = 0.2
-    FAR = 2.0
+    NEAR = 0.1
+    FAR = 1.0
     
     pose_left = np.array([
         [1, 0, 0, 0],
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     colors=np.asarray(pcd.colors)
 
     # remove points at both ends for now
-    pts_corrected = my_utils.run_corrective_pipeline_on_world(
+    pts_corrected, colors = my_utils.run_corrective_pipeline_on_world(
         pts=pts,
         colors=colors,
         pose_left=pose_left,
