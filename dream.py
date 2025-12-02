@@ -19,11 +19,16 @@ import time
 import pickle as pkl
 import argparse
 # local imports
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
+if os.environ['USER'] == 'k.kassab':
+    _360monodepth_install_dir = "/home/k.kassab/panorama/LayerPano3D/submodules/360monodepth/code/python/src/"
+elif os.environ['USER'] == 'a.schnepf':
+    _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
+else:
+    raise ValueError("Unknown user.")
 sys.path.append(_360monodepth_install_dir) 
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
-from egformer import get_egformer_depth
+# from egformer import get_egformer_depth
 import my_utils
 
 logging.disable(logging.CRITICAL + 1)
