@@ -67,10 +67,10 @@ def set_camera_from_elev_azim(scene_camera,
     scene_camera.look_at(lookat, cam_pos, up)
 
 
-expname = '33_city'
+expname = '0_seaside'
 num_dreams = 4
 sphere_radius = 1.0
-max_x = (num_dreams-1) * sphere_radius * np.pi/2
+max_x = (num_dreams-1) * sphere_radius * np.pi/2 # @Karim: np.pi/2 c'est delta_walk dans les configs
 visualize_removed_points = False
 remove_outliers = True
 fix_world = True
@@ -95,7 +95,7 @@ if fix_world:
         "correct_depth": False,
         "near": NEAR,
         "far": FAR,
-        "correct_walls": True,
+        "correct_walls": False,
         "remove_outliers": False,
         "correct_floor": True,
         "depth_threshold_for_floor_correction": 1.0,

@@ -1,0 +1,23 @@
+# ---meta---
+expname: 0_city_rot90_corr
+skip_phase1: True
+
+# ----- args generation -----
+prompt: A bustling city street at night, neon lights reflecting on wet pavement, realism style.
+
+phase2: 
+  rotate_intermediate_camera_by_deg: 90.0
+
+
+geometry_correction:
+  sphere:
+    correct_depth: False
+    near: 0.1
+    far: 1.0
+    correct_walls: True
+    correct_floor: True
+    depth_threshold_for_floor_correction: 0.6
+    remove_sky: False
+    remove_outliers: True
+    verbose: False
+    plot: False

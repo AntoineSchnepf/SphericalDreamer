@@ -1,6 +1,9 @@
 # ---meta---
-expname: 0_seaside
+expname: 0_seaside_rot90
+skip_phase1: True
 
 # ----- args generation -----
 prompt: A wide panoramic landscape with a bright blue sky, majestic mountains in the background, a calm turquoise sea in the foreground, and lush greenery along the shore. The scene should feel vibrant, sunny, and relaxing, like a holiday postcard photograph, with realistic lighting and high detail.
 
+phase2: 
+  rotate_intermediate_camera_by_deg: 90.0

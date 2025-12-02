@@ -17,7 +17,7 @@ import argparse
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
 from utils.depth_alignment import Pano_depth_estimation
-from render_pcd import render_v2
+from render_pcd import render_v2, render_v1, render_v0
 import my_utils
 from sphericaldreamer import SphericalDreamer
 
@@ -40,20 +40,30 @@ def render_and_inpaint_from_pose(
         skip_inpainting, 
         prompt,
         masking_operations,
+        rendering_version,
         where_save
     ):
 
     res = {}
 
     # 4. Render points from sphere2 (opened right) + sphere2 (opened left), from the intermediate camera
-    warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_v2(
+    if rendering_version==0:
+        render_fn = render_v0
+    elif rendering_version==1:
+        render_fn = render_v1
+    elif rendering_version==2:
+        render_fn = render_v2
+    else:
+        raise ValueError(f"rendering_version {rendering_version} not recognized!")
+    t0 = time.time()
+    warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_fn(
         all_pts_world=current_points, 
         all_colors_world=current_colors, 
         pose=camera_pose,
         height=height,
         width=width
     )
-    print("Rendered all points from intermediate camera!")
+    print(f"Rendered all points from intermediate camera in {time.time()-t0:.1f} seconds (Render v{rendering_version})!")
 
 
     # 5. Get missing info mask
@@ -118,7 +128,6 @@ def render_and_inpaint_from_pose(
     
     return res
 
-
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
         debug=False, 
@@ -148,8 +157,8 @@ if __name__ == "__main__":
 
         # Optional upsampling step to increase pointcloud density
         if config.pcd_upsampling_factor>1:
-            colors1 = my_utils.opencv_resize(colors1, height*2, width*2, mode='bilinear')
-            depth1 = my_utils.opencv_resize(depth1, height*2, width*2, mode='bilinear')
+            colors1 = my_utils.opencv_resize(colors1, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+            depth1 = my_utils.opencv_resize(depth1, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
 
         pts1_carte = my_utils.depth2cam_carte(
             depth=depth1,
@@ -185,8 +194,8 @@ if __name__ == "__main__":
             )
             # Optional upsampling step to increase pointcloud density
             if config.pcd_upsampling_factor>1:
-                colors2 = my_utils.opencv_resize(colors2, height*2, width*2, mode='bilinear')
-                depth2 = my_utils.opencv_resize(depth2, height*2, width*2, mode='bilinear')
+                colors2 = my_utils.opencv_resize(colors2, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+                depth2 = my_utils.opencv_resize(depth2, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
 
             pts2_carte = my_utils.depth2cam_carte(
                 depth=depth2,
@@ -219,6 +228,10 @@ if __name__ == "__main__":
             
             assert np.allclose(pose_intermediate, pose_intermediate_bis), "Error in camera intermediate pose computation"
             pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, config.raise_intermediate_camera_by_z]))
+            rotation_before_inpainting = my_utils.rotation_matrix_z(config.phase2.rotate_intermediate_camera_by_deg * np.pi / 180) 
+            pose_intermediate[:3, :3] = rotation_before_inpainting @ pose_intermediate[:3, :3]
+            
+
 
             # 4. Generate missing points from pose, inpaint, estimate depth (inside function below)
             current_points=np.concatenate((
@@ -228,12 +241,12 @@ if __name__ == "__main__":
                 sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
             ), axis=0)
             masking_operations = [
-                    partial(minimum_filter, size=(3,3), axes=(0,1)),
-                    partial(maximum_filter, size=(3,3), axes=(0,1)),
-                    partial(maximum_filter, size=(3,3), axes=(0,1)),
-                    partial(maximum_filter, size=(3,3), axes=(0,1)),
-                    # partial(maximum_filter, size=(8, 8), axes=(0,1)),
-                ]
+                partial(minimum_filter, size=(3,3), axes=(0,1)),
+                partial(maximum_filter, size=(3,3), axes=(0,1)),
+                partial(maximum_filter, size=(3,3), axes=(0,1)),
+                partial(maximum_filter, size=(3,3), axes=(0,1)),
+                # partial(maximum_filter, size=(8, 8), axes=(0,1)),
+            ]
             res_render_inpaint = render_and_inpaint_from_pose(
                 current_points=current_points, 
                 current_colors=current_colors, 
@@ -243,6 +256,7 @@ if __name__ == "__main__":
                 skip_inpainting=config.phase2.skip_inpainting, 
                 prompt=config.prompt,
                 masking_operations=masking_operations,
+                rendering_version=config.phase2.rendering_version,
                 where_save=save_dir__,
             )
 

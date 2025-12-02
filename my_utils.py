@@ -2656,6 +2656,14 @@ def _slerp(q0, q1, t):
     q = s0 * q0 + s1 * q1
     return q / np.linalg.norm(q)
 
+def rotation_matrix_z(theta):
+    R = np.array([
+        [np.cos(theta), -np.sin(theta), 0],
+        [np.sin(theta),  np.cos(theta), 0],
+        [0,              0,             1]
+    ], dtype=float)
+    return R
+
 def get_intermediate_camera_poses(
         start_pose,
         end_pose,

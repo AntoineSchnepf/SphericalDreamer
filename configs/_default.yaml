@@ -12,7 +12,7 @@ num_dreams: 4
 prompt: "default prompt"
 width: 1440
 height: 720
-pcd_upsampling_factor: 2
+pcd_upsampling_factor: 4
 translation_direction: [1, 0, 0] # x, y, z
 delta_walk: 1.57
 raise_intermediate_camera_by_z: 0.3    
@@ -50,6 +50,8 @@ phase1: # panorama generation
 phase2: # pairs of sphere inpainting + deformation
   skip_inpainting: False
   excessive_pcd_logging: False
+  rotate_intermediate_camera_by_deg: 0.0
+  rendering_version: 0 # 0, 1 or 2
 
 phase3: #  final hole filling
   skip_inpainting: False 
