@@ -1,5 +1,6 @@
 # ---meta---
 expname: 0_forest
+skip_phase1: True
 
 # ----- args generation -----
 prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
