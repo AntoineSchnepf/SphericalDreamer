@@ -98,6 +98,8 @@ def printc(str, color=None):
 def copy_phase_folders(folder_start_with: str, item_start_with: str,
                        source_dir: Path, dest_dir: Path):
 
+    if source_dir == dest_dir:
+        return
     source_dir = Path(source_dir)
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
