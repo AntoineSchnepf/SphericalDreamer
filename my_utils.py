@@ -20,6 +20,18 @@ import collections.abc
 from prodict import Prodict
 import argparse
 import pyfiglet
+import shutil
+from pathlib import Path
+
+
+_phase_2b_files = [
+    "07_harmonic_blending_masks.png",
+    "08_blended_depth_harmonic.png",
+    "08_blended_depth_naive.png",
+    "pointclouds_zoo.pkl",
+    "raw_dream_pcd.pkl",
+]
+
 # -------------------------------------------- #
 # --------------- Config utils ---------------- #
 # -------------------------------------------- #
@@ -81,6 +93,36 @@ def printc(str, color=None):
             "end": "\033[0m"
         }
         print(f"{colors[color]}{str}{colors['end']}")
+
+
+def copy_phase_folders(folder_start_with: str, item_start_with: str,
+                       source_dir: Path, dest_dir: Path):
+
+    source_dir = Path(source_dir)
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- 1. Copy root-level files that match item_start_with ---
+    for item in source_dir.iterdir():
+        if item.is_file() and item.name.startswith(item_start_with):
+            shutil.copy2(item, dest_dir / item.name)
+
+    # --- 2. Copy folders that match folder_start_with ---
+    for folder in source_dir.iterdir():
+        if folder.is_dir() and folder.name.startswith(folder_start_with):
+
+            dst_folder = dest_dir / folder.name
+            dst_folder.mkdir(parents=True, exist_ok=True)
+
+            # --- 3. Inside the folder, copy only items with item_start_with ---
+            for sub in folder.iterdir():
+                if sub.name.startswith(item_start_with):
+
+                    dst_item = dst_folder / sub.name
+                    if sub.is_dir():
+                        shutil.copytree(sub, dst_item, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(sub, dst_item)
 
 def fetch_config_via_parser(debug, debug_parser_override=[]):
     repo_path = os.path.dirname(os.path.realpath(__file__))

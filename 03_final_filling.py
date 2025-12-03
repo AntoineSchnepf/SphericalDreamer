@@ -1,4 +1,17 @@
 import os
+import warnings
+import logging
+import contextlib
+from io import StringIO
+
+# Disabling some warnings
+os.environ["GLOG_minloglevel"] = "2"
+os.environ["GLOG_logtostderr"] = "0"
+os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
+logging.disable(logging.CRITICAL + 1)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.simplefilter("ignore", FutureWarning)
+
 import sys
 import cv2
 from matplotlib import image
@@ -13,7 +26,6 @@ import copy
 from functools import partial
 from skimage.segmentation import find_boundaries
 from scipy.ndimage import maximum_filter, minimum_filter
-import logging
 import matplotlib.pyplot as plt
 import time
 import pickle as pkl
@@ -26,11 +38,8 @@ sys.path.append(_360monodepth_install_dir)
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
 import my_utils
-from sphericaldreamer import SphericalDreamer
-
-logging.disable(logging.CRITICAL + 1)
-
-
+with contextlib.redirect_stdout(StringIO()):
+    from sphericaldreamer import SphericalDreamer
 
 
 if __name__ == "__main__":
@@ -50,7 +59,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------- # 
     # ----- PHASE III. POST PROCESSING OF THE FINAL POINTCLOUD WITH HOLE FILLING ----- #
     # -------------------------------------------------------------------------------- #
-    print(f"=== EXPERIMENT: {config.expname} ===")
+    printc(f"=== [PHASE 3]  EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.skip_phase3:
         print("=== PHASE III : GET FINAL POINTCLOUD WITH HOLE FILLING ===")
 

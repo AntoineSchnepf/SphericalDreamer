@@ -1,4 +1,18 @@
 import os
+import warnings
+import logging
+import contextlib
+from io import StringIO
+
+# Disabling some warnings
+os.environ["GLOG_minloglevel"] = "2"
+os.environ["GLOG_logtostderr"] = "0"
+os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
+logging.disable(logging.CRITICAL + 1)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.simplefilter("ignore", FutureWarning)
+
+
 import sys
 import numpy as np
 from PIL import Image, ImageOps
@@ -6,22 +20,26 @@ import copy
 from functools import partial
 from skimage.segmentation import find_boundaries
 from scipy.ndimage import maximum_filter, minimum_filter
-import logging
 import matplotlib.pyplot as plt
 import time
 import pickle as pkl
 from prodict import Prodict
 import pyfiglet
 import argparse
+from pathlib import Path
 # local imports
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
-from utils.depth_alignment import Pano_depth_estimation
-from render_pcd import render_v2, render_v1, render_v0
-import my_utils
-from sphericaldreamer import SphericalDreamer
 
-logging.disable(logging.CRITICAL + 1)
+import my_utils
+from my_utils import printc
+with contextlib.redirect_stdout(StringIO()):
+    from sphericaldreamer import SphericalDreamer
+    from utils.depth_alignment import Pano_depth_estimation
+from render_pcd import render_v2, render_v1, render_v0
+
+output_prefix = "02a_"
+
 
 def get_missing_info_mask(operations, visited_pixels):
     missing_info_masks = [~visited_pixels]
@@ -87,9 +105,9 @@ def render_and_inpaint_from_pose(
             pano_rgb=my_utils.numpy_to_PIL(warped_img_interp), 
             mask=my_utils.numpy_to_PIL(inpainting_mask)
         )
-        pano_inpainted_raw.save(os.path.join(where_save, "XX_pano_rgb_inpainted_raw.png"))
+        pano_inpainted_raw.save(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
     else:
-        pano_inpainted_raw = Image.open(os.path.join(where_save, "XX_pano_rgb_inpainted_raw.png"))
+        pano_inpainted_raw = Image.open(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
 
 
     # 7. Inpainting seamless blending
@@ -107,9 +125,9 @@ def render_and_inpaint_from_pose(
         depth_estimated = spherical_dreamer.estimate_pano_depth(
             pano_rgb=np.array(pano_rgb_inpainted)
         )
-        np.save(os.path.join(where_save, "XX_estimated_depth.npy"), depth_estimated)
+        np.save(os.path.join(where_save, output_prefix+"XX_estimated_depth.npy"), depth_estimated)
     else:
-        depth_estimated = np.load(os.path.join(where_save, "XX_estimated_depth.npy"))
+        depth_estimated = np.load(os.path.join(where_save, output_prefix+"XX_estimated_depth.npy"))
     # depth_estimated=np.ones_like(depth_estimated) * sphere_radius  
     # print("WARNING: estimated depth override to ones for debugging purposes")
     
@@ -145,9 +163,9 @@ if __name__ == "__main__":
     # ------------------------------------------------------------ #
     # ---- PHASE II.a ALIGN PAIRS OF SPHERES WITH INPAINTING  ---- #
     # ------------------------------------------------------------ #
-    print(f"=== EXPERIMENT: {config.expname} ===")
-    if not config.skip_phase2a:
-        print(f"=== {config.expname}: PHASE II.a : ALIGN PAIRS OF SPHERES WITH INPAINTING ===")
+    printc(f"=== [PHASE 2a]  EXPERIMENT: {config.expname} ===", color='cyan')
+    if not config.load_phase2a_from:
+        printc(f"=== {config.expname}: PHASE II.a : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
         # PHASE II.a: INIT
 
         colors1, depth1 = my_utils.load_rgbd_pano(
@@ -183,7 +201,7 @@ if __name__ == "__main__":
 
         # PHASE II.a: LOOP
         for i in range(1, config.num_dreams):
-            print(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---")
+            printc(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
             save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
             os.makedirs(save_dir__, exist_ok=True)
 
@@ -274,9 +292,9 @@ if __name__ == "__main__":
             depth_estimated           = res_render_inpaint['depth_estimated']
 
             # 5. Save YY data reserved for phase 2.B
-            sphere1.save_dict(os.path.join(save_dir__, "YY_sphere1.pkl"))
-            sphere2.save_dict(os.path.join(save_dir__, "YY_sphere2.pkl"))
-            np.save(f"{save_dir__}/YY_other.npy", {
+            sphere1.save_dict(os.path.join(save_dir__, output_prefix+"YY_sphere1.pkl"))
+            sphere2.save_dict(os.path.join(save_dir__, output_prefix+"YY_sphere2.pkl"))
+            np.save(f"{save_dir__}/{output_prefix}YY_other.npy", {
                 'pose_intermediate'    : pose_intermediate,
                 'warped_img_interp'    : warped_img_interp,
                 'warped_depth_interp'  : warped_depth_interp,
@@ -286,18 +304,16 @@ if __name__ == "__main__":
             })
 
             # 6. Save debug images
-            my_utils.numpy_to_PIL(warped_img)           .save(os.path.join(save_dir__, "01_warped_img.png"))
-            my_utils.numpy_to_PIL(warped_img_interp)    .save(os.path.join(save_dir__, "01_warped_img_interp.png"))
+            my_utils.numpy_to_PIL(warped_img)           .save(os.path.join(save_dir__, output_prefix+"01_warped_img.png"))
+            my_utils.numpy_to_PIL(warped_img_interp)    .save(os.path.join(save_dir__, output_prefix+"01_warped_img_interp.png"))
 
-            my_utils.depth_numpy_to_figure(warped_depth)        .savefig(os.path.join(save_dir__, "02_warped_depth.png"))
-            my_utils.depth_numpy_to_figure(warped_depth_interp) .savefig(os.path.join(save_dir__, "02_warped_depth_interp.png"))
-
-            missing_info_masks_tile                      .save(   os.path.join(save_dir__, "03_missing_info_masks_tile.png"))
-            overlay_before_inpainting                    .save(   os.path.join(save_dir__, "04_overlay_before_inpainting.png"))
-            pano_inpainted_raw                           .save(   os.path.join(save_dir__, "05_pano_rgb_inpainted_raw.png"))
-            pano_rgb_inpainted                           .save(   os.path.join(save_dir__, "06_pano_rgb_inpainted.png"))
-
-            my_utils.depth_numpy_to_figure(depth_estimated) .savefig(os.path.join(save_dir__, "07_estimated_depth.png"))
+            my_utils.depth_numpy_to_figure(warped_depth)        .savefig(os.path.join(save_dir__, output_prefix+"02_warped_depth.png"))
+            my_utils.depth_numpy_to_figure(warped_depth_interp) .savefig(os.path.join(save_dir__, output_prefix+"02_warped_depth_interp.png"))
+            missing_info_masks_tile                      .save(   os.path.join(save_dir__, output_prefix+"03_missing_info_masks_tile.png"))
+            overlay_before_inpainting                    .save(   os.path.join(save_dir__, output_prefix+"04_overlay_before_inpainting.png"))
+            pano_inpainted_raw                           .save(   os.path.join(save_dir__, output_prefix+"05_pano_rgb_inpainted_raw.png"))
+            pano_rgb_inpainted                           .save(   os.path.join(save_dir__, output_prefix+"06_pano_rgb_inpainted.png"))
+            my_utils.depth_numpy_to_figure(depth_estimated) .savefig(os.path.join(save_dir__, output_prefix+"07_estimated_depth.png"))
 
 
             # 7. END: Adjust sphere1 to be sphere2 for next iteration
@@ -305,6 +321,15 @@ if __name__ == "__main__":
             pose1 = pose2
 
 
-        print("=== PHASE II.a SUCCESSFULLY COMPLETED! ===")
+        printc("=== PHASE II.a SUCCESSFULLY COMPLETED! ===", color='green')
     else:
-        print("=== SKIPPING PHASE II.a: ALIGN PAIRS + INPAINT ===")
+        printc("SKIPPING PHASE II.a: ALIGN PAIRS + INPAINT", color='magenta')
+        printc(f"Loading instead from {config.load_phase2a_from}", color='magenta')
+        source_phase2a_path = Path(config.save_dir) / config.load_phase2a_from
+        dest_phase2a_path = Path(save_dir_)
+        my_utils.copy_phase_folders(
+            folder_start_with="align_",
+            item_start_with=output_prefix,
+            source_dir=source_phase2a_path,
+            dest_dir=dest_phase2a_path
+        )
