@@ -38,6 +38,7 @@ sys.path.append(_360monodepth_install_dir)
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
 import my_utils
+from my_utils import printc
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
 

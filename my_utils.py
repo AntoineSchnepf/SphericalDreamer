@@ -23,15 +23,6 @@ import pyfiglet
 import shutil
 from pathlib import Path
 
-
-_phase_2b_files = [
-    "07_harmonic_blending_masks.png",
-    "08_blended_depth_harmonic.png",
-    "08_blended_depth_naive.png",
-    "pointclouds_zoo.pkl",
-    "raw_dream_pcd.pkl",
-]
-
 # -------------------------------------------- #
 # --------------- Config utils ---------------- #
 # -------------------------------------------- #
