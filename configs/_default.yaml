@@ -1,10 +1,11 @@
 # ---meta---
 expname: default_expname
-skip_phase1: False
-skip_phase2a: False
-skip_phase2b: False
-skip_phase3: False
+skip_phase3: True
 
+load_phase1_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase3_from: null
 
 
 # ----- main args  -----

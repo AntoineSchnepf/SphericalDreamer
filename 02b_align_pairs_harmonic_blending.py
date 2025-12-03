@@ -1,4 +1,17 @@
 import os
+import warnings
+import logging
+import contextlib
+from io import StringIO
+
+# Disabling some warnings
+os.environ["GLOG_minloglevel"] = "2"
+os.environ["GLOG_logtostderr"] = "0"
+os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
+logging.disable(logging.CRITICAL + 1)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.simplefilter("ignore", FutureWarning)
+
 import sys
 import cv2
 from matplotlib import image
@@ -13,23 +26,25 @@ import copy
 from functools import partial
 from skimage.segmentation import find_boundaries
 from scipy.ndimage import maximum_filter, minimum_filter
-import logging
 import matplotlib.pyplot as plt
 import time
 import pickle as pkl
+from pathlib import Path
 import argparse
 from prodict import Prodict
 import pyfiglet
 # local imports
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
-from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
 import my_utils
-from sphericaldreamer import SphericalDreamer
+from my_utils import printc
+with contextlib.redirect_stdout(StringIO()):
+    from sphericaldreamer import SphericalDreamer
+    from utils.depth_alignment import Pano_depth_estimation
 
-logging.disable(logging.CRITICAL + 1)
-
+phase2a_output_prefix = "02a_"
+output_prefix = "02b_"
 
 def check_partition(*masks):
     """Return True if masks are disjoint and cover the full image."""
@@ -77,7 +92,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(os.path.join(where_save, "07_harmonic_blending_masks.png"))
+        plt.savefig(os.path.join(where_save, output_prefix+"07_harmonic_blending_masks.png"))
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -138,7 +153,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(os.path.join(where_save, "08_blended_depth_harmonic.png"))
+        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_harmonic.png"))
         plt.show()
 
         return pts_deformed, colors2, pcd_harmonic, blended_depth_harmonic
@@ -164,7 +179,7 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
         plt.imshow(blended_depth, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Naive')
-        plt.savefig(os.path.join(where_save, "08_blended_depth_naive.png"))
+        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_naive.png"))
         plt.show()
 
     return pcd_naive, blended_depth
@@ -294,7 +309,6 @@ def is_point_in_camera_forward_space(point_positions,
     return signed_distances >= -tolerance
 
 
-
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
         debug=False, 
@@ -312,9 +326,9 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------- #
     # ---- PHASE II.b ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING  ----- #
     # -------------------------------------------------------------------- #
-    print(f"=== EXPERIMENT: {config.expname} ===")
-    if not config.skip_phase2b:
-        print(f"=== {config.expname}: PHASE II.b : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===")
+    printc(f"=== [PHASE 2b]  EXPERIMENT: {config.expname} ===", color='cyan')
+    if not config.load_phase2b_from:
+        printc(f"=== {config.expname}: PHASE II.b : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
         # PHASE II.b: INIT
         pointclouds = {}
         all_pts_world = np.array([]).reshape(0, 3)
@@ -325,12 +339,12 @@ if __name__ == "__main__":
             print(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---")
             save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
 
-            sphere1=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, "YY_sphere1.pkl"))
-            sphere2=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, "YY_sphere2.pkl"))
+            sphere1=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, phase2a_output_prefix+"YY_sphere1.pkl"))
+            sphere2=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, phase2a_output_prefix+"YY_sphere2.pkl"))
             pose1=sphere1.pose
             pose2=sphere2.pose
 
-            data = np.load(f"{save_dir__}/YY_other.npy", allow_pickle=True).item()
+            data = np.load(f"{save_dir__}/{phase2a_output_prefix}YY_other.npy", allow_pickle=True).item()
 
             depth_estimated       = data['depth_estimated']
             pose_intermediate     = data['pose_intermediate']
@@ -397,18 +411,26 @@ if __name__ == "__main__":
 
 
             # save pcd
-            with open(os.path.join(save_dir_, "pointclouds_zoo.pkl"), 'wb') as f:
+            with open(os.path.join(save_dir_, output_prefix+"pointclouds_zoo.pkl"), 'wb') as f:
                 pkl.dump(pointclouds, f)
 
         # END OF PHASE II: final pcd save
-        with open(os.path.join(save_dir_, "raw_dream_pcd.pkl"), 'wb') as f:
+        with open(os.path.join(save_dir_, output_prefix+"raw_dream_pcd.pkl"), 'wb') as f:
             pkl.dump(
                 my_utils.PointCloud(
                     pts=all_pts_world,
                     colors=all_colors_world
                 ), f)
 
-
-        print("PHASE II.a SUCCESSFULLY COMPLETED!")
+        print("PHASE II.b SUCCESSFULLY COMPLETED!")
     else:
-        print("=== SKIPPING PHASE II.a: ALIGN PAIRS + INPAINT ===")
+        printc("SKIPPING PHASE II.b: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
+        printc(f"Loading instead from {config.load_phase2b_from}", color='magenta')
+        source_phase2b_path = Path(config.save_dir) / config.load_phase2b_from
+        dest_phase2b_path = Path(save_dir_)
+        my_utils.copy_phase_folders(
+            folder_start_with="align_",
+            item_start_with=output_prefix,
+            source_dir=source_phase2b_path,
+            dest_dir=dest_phase2b_path
+        )

@@ -16,7 +16,13 @@ import torch
 import sys
 import shutil
 
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
+if os.environ['USER'] == 'k.kassab':
+    _360monodepth_install_dir = "/home/k.kassab/panorama/LayerPano3D/submodules/360monodepth/code/python/src/"
+elif os.environ['USER'] == 'a.schnepf':
+    _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
+else:
+    raise ValueError("Unknown user.")
+
 sys.path.append(_360monodepth_install_dir) 
 
 from utility import blending, image_io, depthmap_utils, serialization, pointcloud_utils, subimage

@@ -1,6 +1,12 @@
 # ---meta---
-expname: 0_forest
-skip_phase1: True
+expname: 4_forest
 
 # ----- args generation -----
 prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
+
+num_dreams: 2
+
+load_phase1_from: 3_forest
+load_phase2a_from: 3_forest
+load_phase2b_from: 3_forest
+load_phase3_from: 3_forest
