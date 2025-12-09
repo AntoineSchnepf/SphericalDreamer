@@ -4122,6 +4122,279 @@ def unique_gradient_image(width=1024, height=1024) -> Image.Image:
     return Image.fromarray(img, mode="RGB")
 
 
+# ------------------------------------------------ #
+# ------------------ Video Utils ----------------- #
+# ------------------------------------------------ #
+import numpy as np
+import imageio.v2 as imageio
+import open3d as o3d
+
+def save_video_from_o3d_images(
+    images,
+    out_path,
+    fps=20,
+    codec="libx264"
+):
+    """
+    Save a list of Open3D images (renderer.render_to_image()) as a video.
+
+    Args:
+        images: list of open3d.geometry.Image (or numpy arrays).
+        out_path: output video path, e.g. "video.mp4".
+        fps: frames per second.
+        codec: video codec (for mp4, "libx264" is common; may require ffmpeg).
+
+    Note:
+        Requires: `pip install "imageio[ffmpeg]"`.
+    """
+    if len(images) == 0:
+        raise ValueError("No images provided to save_video_from_o3d_images")
+
+    writer = imageio.get_writer(out_path, fps=fps, codec=codec)
+
+    try:
+        for img in images:
+            # Convert Open3D image to numpy array if needed
+            if isinstance(img, o3d.geometry.Image):
+                frame = np.asarray(img)
+            else:
+                frame = np.asarray(img)
+
+            # Ensure 3 channels (RGB)
+            if frame.ndim == 2:  # grayscale -> RGB
+                frame = np.repeat(frame[..., None], 3, axis=-1)
+            elif frame.shape[2] == 4:  # RGBA -> RGB
+                frame = frame[..., :3]
+
+            # Ensure uint8
+            if frame.dtype != np.uint8:
+                # Assume in [0, 1] if float
+                if np.issubdtype(frame.dtype, np.floating):
+                    frame = np.clip(frame, 0.0, 1.0)
+                    frame = (frame * 255).astype(np.uint8)
+                else:
+                    frame = frame.astype(np.uint8)
+
+            writer.append_data(frame)
+    finally:
+        writer.close()
+
+    print(f"Saved video to {out_path}")
+
+def set_camera_from_elev_azim(scene_camera,
+                              cam_pos,
+                              elev_deg,
+                              azim_deg,
+                              fov_deg,
+                              width,
+                              height,
+                              near,
+                              far):
+    """
+    Set Open3D rendering camera from:
+      - camera position (world coords),
+      - elevation angle (deg) above XY plane,
+      - azimuth angle (deg) around Z,
+      - perspective intrinsics (fov, near, far).
+
+    Convention:
+      - World Z is "up".
+      - Azimuth = 0° looks along +X, increases toward +Y.
+      - Elevation = 0° in XY plane, +90° straight up (+Z), -90° straight down.
+    """
+    cam_pos = np.asarray(cam_pos, dtype=float)
+    elev = np.deg2rad(elev_deg)
+    azim = np.deg2rad(azim_deg)
+
+    # Forward direction from spherical angles
+    fx = np.cos(elev) * np.cos(azim)
+    fy = np.cos(elev) * np.sin(azim)
+    fz = np.sin(elev)
+    forward = np.array([fx, fy, fz], dtype=float)
+
+    # Default world up
+    world_up = np.array([0.0, 0.0, 1.0], dtype=float)
+
+    # Avoid collinearity between forward and up
+    if np.abs(np.dot(forward, world_up)) > 0.99:
+        world_up = np.array([0.0, 1.0, 0.0], dtype=float)
+
+    # Orthonormal basis: right, up, forward
+    right = np.cross(forward, world_up)
+    right /= np.linalg.norm(right)
+    up = np.cross(right, forward)
+    up /= np.linalg.norm(up)
+
+    # Look-at point (along forward)
+    lookat = cam_pos + forward
+
+    # Use the correct FovType enum (Vertical or Horizontal)
+    fov_type = o3d.visualization.rendering.Camera.FovType.Vertical
+
+    scene_camera.set_projection(fov_deg,
+                                width / height,
+                                near,
+                                far,
+                                fov_type)
+    scene_camera.look_at(lookat, cam_pos, up)
+
+def interpolate_lists(a, b, steps=4):
+    """
+    Interpolate element-wise between lists a and b using np.linspace.
+
+    a, b: lists (or arrays) of equal length
+    steps: number of interpolated points including start and end
+    """
+    a = np.array(a, dtype=float)
+    b = np.array(b, dtype=float)
+
+    if a.shape != b.shape:
+        raise ValueError("Lists must have the same shape.")
+
+    # Stack linspace results for each dimension
+    return np.array([np.linspace(a[i], b[i], steps) for i in range(len(a))]).T
+
+def stretch_append(*lists):
+    # Length of the longest list
+    max_len = max(len(lst) for lst in lists)
+
+    result = []
+    for j in range(max_len):
+        row = []
+        for lst in lists:
+            n = len(lst)
+            if n == 0:
+                raise ValueError("Lists must be non-empty")
+
+            # Map position j in [0, max_len) to an index in [0, n)
+            # This creates contiguous chunks per element.
+            idx = min(int(j * n / max_len), n - 1)
+            row.append(lst[idx])
+        result.append(row)
+
+    return result
+
+def get_template_tranjectories(trajectory):
+    # x, y, z, elev, azims
+    if trajectory == 'test_walk':
+        test_walk = [
+        [0, 0, 0, 0, 0],
+        [0.25, 0, 0, 0, 0],
+        [0.25, 0, 0, 0, 60],
+        [0.5, 0, 0, 0, -60],
+        [0.5, 0, 0, 0, 60],
+        [0.75, 0, 0, -10, 0],
+        [1, 0, 0, 0, 20],
+    ]
+        return test_walk
+    elif trajectory == 'walk':
+        walk = [
+        [0, 0, 0, 0, 0],
+        [1.0, 0, 0, 0, 0],
+    ]
+        return walk
+    elif trajectory == 'walk_look':
+        walk_look = [
+        [0, 0, 0, 0, 0],
+        [0.25, 0, 0, 0, 0],
+        [0.25, 0, 0, 0, -45],
+        [0.25, 0, 0, 0, 45],
+        [0.25, 0, 0, 0, 0],
+        [0.5, 0, 0, 0, 0],
+        [0.5, 0, 0, 0, -45],
+        [0.5, 0, 0, 0, 45],
+        [0.5, 0, 0, 0, 0],
+        [0.75, 0, 0, 0, 0],
+        [0.75, 0, 0, 0, -45],
+        [0.75, 0, 0, 0, 45],
+        [0.75, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0],
+        [1, 0, 0, 0, -45],
+        [1, 0, 0, 0, 45],
+        [1, 0, 0, 0, 0],
+    ]
+        return walk_look
+    elif trajectory == 'walk_lookaround':
+        walk_lookaround = [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 360],
+        [0.25, 0, 0, 0, 360],
+        [0.25, 0, 0, 0, 360*2],
+        [0.5, 0, 0, 0, 360*2],
+        [0.5, 0, 0, 0, 360*3],
+        [0.75, 0, 0, 0, 360*3],
+        [0.75, 0, 0, 0, 360*4],
+        [1, 0, 0, 0, 360*4],
+        [1, 0, 0, 0, 360*5],
+    ]
+        return walk_lookaround
+    elif trajectory == 'zigzag':
+        zigzag_y = 0.25
+        zigzag_az = 45
+        zigzag = [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, zigzag_az],
+        [0.25, zigzag_y, 0, 0, zigzag_az],
+        [0.25, zigzag_y, 0, 0, -zigzag_az],
+        [0.5, -zigzag_y, 0, 0, -zigzag_az],
+        [0.5, -zigzag_y, 0, 0, zigzag_az],
+        [0.75, zigzag_y, 0, 0, zigzag_az],
+        [0.75, zigzag_y, 0, 0, -zigzag_az],
+        [1.0, -zigzag_y, 0, 0, -zigzag_az],
+        [1.0, -zigzag_y, 0, 0, zigzag_az],
+    ]
+        return zigzag
+    elif trajectory == 'walk_lookupdown':
+        lookup_angle = 45
+        lookdown_angle = -45
+        walk_lookupdown = [
+        [0, 0, 0, 0, 0],
+        [0.25, 0, 0, 0, 0],
+        [0.25, 0, 0, lookup_angle, 0],
+        [0.25, 0, 0, lookdown_angle, 0],
+        [0.25, 0, 0, 0, 0],
+        [0.5, 0, 0, 0, 0],
+        [0.5, 0, 0, lookup_angle, 0],
+        [0.5, 0, 0, lookdown_angle, 0],
+        [0.5, 0, 0, 0, 0],
+        [0.75, 0, 0, 0, 0],
+        [0.75, 0, 0, lookup_angle, 0],
+        [0.75, 0, 0, lookdown_angle, 0],
+        [0.75, 0, 0, 0, 0],
+        [1.0, 0, 0, 0, 0],
+        [1.0, 0, 0, lookup_angle, 0],
+        [1.0, 0, 0, lookdown_angle, 0],
+        [1.0, 0, 0, 0, 0],
+    ]
+        return walk_lookupdown
+
+def interpolate_camera_keypoints(camera_keypoints, fpm, fpd_e, fpd_a, max_x):
+    all_cameras = []
+    for i in range(len(camera_keypoints)-1):
+        start = camera_keypoints[i]
+        end = camera_keypoints[i+1]
+
+        num_cameras_x = np.abs(end[0] - start[0]) * max_x * fpm 
+        num_cameras_y = np.abs(end[1] - start[1]) * fpm
+        num_cameras_z = np.abs(end[2] - start[2]) * fpm
+        num_camers_elevs = np.abs(end[3] - start[3]) * fpd_e
+        num_camers_azims = np.abs(end[4] - start[4]) * fpd_a
+
+        num_cameras = max(num_cameras_x, num_cameras_y, num_cameras_z, num_camers_elevs, num_camers_azims)
+        num_cameras = int(num_cameras) + 1
+
+        # print(f"num_cameras_x: {num_cameras_x}, num_cameras_y: {num_cameras_y}, num_cameras_z: {num_cameras_z}")
+        # print(f"num_camers_elevs: {num_camers_elevs}, num_camers_azims: {num_camers_azims}")
+
+        all_x = np.linspace(start[0], end[0], num_cameras)
+        all_y = np.linspace(start[1], end[1], num_cameras)
+        all_z = np.linspace(start[2], end[2], num_cameras)
+        all_elevs = np.linspace(start[3], end[3], num_cameras)
+        all_azims = np.linspace(start[4], end[4], num_cameras)
+
+        all_cameras.extend(stretch_append(all_x, all_y, all_z, all_elevs, all_azims))
+    return all_cameras
+
 # ----- TESTS -----
 if __name__ == "__main__":
     # test erp2sph_2D and sph2erp_2D

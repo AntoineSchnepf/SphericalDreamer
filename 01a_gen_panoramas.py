@@ -27,8 +27,8 @@ from my_utils import printc
 
 
 
-
 if __name__ == "__main__":
+    # TODO karim: add override functionality and save config
     config = my_utils.fetch_config_via_parser(
         debug=False, 
         debug_parser_override=["--config", "forest.yaml"]
