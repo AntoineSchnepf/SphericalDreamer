@@ -57,6 +57,42 @@ phase2: # pairs of sphere inpainting + deformation
 phase3: #  final hole filling
   skip_inpainting: False 
 
+phase4: # render video
+  visualize_removed_points: False
+  fix_world: True
+  point_size: 3.0
+  bg_color: [0, 0, 0, 1]
+  width: 1280
+  height: 720
+  remove_outliers:
+    apply: True
+    nb_neighbors: 20
+    std_ratio: 5.0
+  world:
+    correct_depth: True
+    near: 0.1
+    far: 1.0
+    correct_walls: False
+    correct_floor: True
+    depth_threshold_for_floor_correction: 1.0
+    remove_outliers: False
+  render_settings:
+    trajectory: walk_look # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
+    custom_trajectory: [] # List of [x, y, z, elev, azim], only used if trajectory is 'custom'
+    ranges:
+      min_x: 0.0
+      min_y: -1.0
+      max_y: 1.0
+      min_z: -0.1
+      mid_z: 0.15
+      max_z: 1.5
+    framerate:
+      fps: 60
+      fpm: 200
+      fpd_e: 3
+      fpd_a: 3
+
+
 # tuned args
 depth_model: 360mono # in ['360mono', 'egformer']
 sphere_radius: 1.0
@@ -67,3 +103,12 @@ seed_offsets: [0, 9, 20, 33, 45]
 
 # logging
 save_dir: OUTPUTS/SphericalDreamerRecurse
+
+
+# trajectory: "detault" # 'detault' or 'custom' and zigzag and lookup
+# translate: [0.1, 0.2, 0.1]
+# rotate: [
+#   [180, -180],
+#   [90],
+#   [360],
+# ]
