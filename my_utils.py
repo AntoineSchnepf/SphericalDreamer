@@ -239,6 +239,9 @@ def mask_resize(mask, new_h, new_w):
     """Resize a binary mask using nearest neighbor interpolation."""
     return opencv_resize(mask.astype(np.uint8), new_h, new_w, mode="nearest").astype(bool)
 
+def resize_depth():
+   #TODO
+   pass
 # ---------------------------- #
 # ------ Visualization ------- #
 # ---------------------------- #
@@ -901,7 +904,7 @@ def world2cam_carte_3D(points_3D_world_carte, pose):
     return points_3D_cam_carte
 
 
-# depth2 functions (assumes depth is in [0,1] with shape [H,W])
+# depth2 functions (assumes has shape [H,W])
 def get_canonical_sph_pixels(height, width):
     points_2D_erp = np.stack((np.meshgrid(range(width), range(height))), axis=-1) 
     points_2D_sph = erp2sph_2D(points_2D_erp, erp_image_height=height, erp_image_width=width)
@@ -930,11 +933,11 @@ def depth2world(depth, pose, sphere_radius, height, width):
 def load_rgbd_pano(dream, save_dir_, override_depth_with_ones=False):
     load_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
     pano_rgb = Image.open(os.path.join(load_dir__, "XX_pano_rgb.png"))
+    colors = PIL_to_numpy(pano_rgb)
     depth = np.load(os.path.join(load_dir__, "XX_depth.npy"))
     if override_depth_with_ones:
         depth = np.ones_like(depth)  
         print("WARNING: depth override to ones for debugging purposes")
-    colors = np.array(pano_rgb)/255.0
     return colors, depth
 
 def save_rgbd_pano(pano_rgb, depth, dream, save_dir_):
@@ -944,6 +947,37 @@ def save_rgbd_pano(pano_rgb, depth, dream, save_dir_):
     np.save(os.path.join(save_dir__, "XX_depth.npy"), depth)
     depth_numpy_to_PIL(depth).save(os.path.join(save_dir__, "XX_depth.png"))
     depth_numpy_to_figure(depth).savefig(os.path.join(save_dir__, "XX_depth_figure.png"))
+
+def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, dream, save_dir_, phase):
+    if phase == 1:
+        save_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
+    elif phase == 2:
+        save_dir__ = os.path.join(save_dir_, f"align_{dream:02d}")
+    else:
+        raise ValueError("phase must be 1 or 2, received:", phase)
+    
+    os.makedirs(save_dir__, exist_ok=True)
+    pano_rgb_bg.save(os.path.join(save_dir__, "YY_pano_rgb_bg.png"))
+    np.save(os.path.join(save_dir__, "YY_depth_bg.npy"), depth_bg)
+    depth_numpy_to_PIL(depth_bg).save(os.path.join(save_dir__, "depth_bg.png"))
+    depth_numpy_to_figure(depth_bg).savefig(os.path.join(save_dir__, "YY_depth_bg_figure.png"))
+    numpy_bool_to_pil_mask(mask_bg).save(os.path.join(save_dir__, "YY_mask_bg.png"))
+
+def load_rgbd_ldi_pano(dream, save_dir_, phase):
+    if phase == 1:
+        load_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
+    elif phase == 2:
+        load_dir__ = os.path.join(save_dir_, f"align_{dream:02d}")
+    else:
+        raise ValueError("phase must be 1 or 2, received:", phase)
+    
+    pano_rgb_bg = Image.open(os.path.join(load_dir__, "YY_pano_rgb_bg.png"))
+    colors_bg = PIL_to_numpy(pano_rgb_bg)
+    depth_bg = np.load(os.path.join(load_dir__, "YY_depth_bg.npy"))
+    mask_bg = pil_mask_to_numpy_bool(Image.open(os.path.join(load_dir__, "YY_mask_bg.png")))
+
+    return colors_bg, depth_bg, mask_bg
+
 
 class PointCloud:
     def __init__(self, pts, colors):

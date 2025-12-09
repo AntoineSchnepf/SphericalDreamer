@@ -2,7 +2,7 @@
 # Run multiple experiments for SphericalDreamer
 
 repo_dir="/home/a.schnepf/phd/SphericalDreamer"
-script="$repo_dir/dream.py"
+script="$repo_dir/dream.sh"
 
 # Ensure the script exists
 if [ ! -f "$script" ]; then
@@ -10,10 +10,25 @@ if [ ! -f "$script" ]; then
     exit 1
 fi
 
+# Define array of configs
+configs=(
+    "Antoine/C0_city.yaml"
+    "Antoine/C1_city_corr.yaml"
+    "Antoine/F0_forest.yaml"
+    "Antoine/S0_seaside.yaml"
+)
+
 # Run experiments
-for exp_id in 0 1 2 3; do
-    echo "🚀 Running experiment $exp_id..."
-    python "$script" --exp_id "$exp_id" 
+for config in "${configs[@]}"; do
+    echo "🚀 Running experiment with config: $config"
+    bash "$script" "$config"
+
+    if [ $? -ne 0 ]; then
+        echo "❌ Experiment with config $config failed."
+        exit 1
+    fi
+
+    echo "✅ Experiment with config $config completed successfully."
 done
 
-echo "✅ All experiments completed successfully."
+echo "🎉 All experiments completed successfully."

@@ -114,10 +114,10 @@ class SphericalDreamer:
         self.pano_inpaint_pipeline = FluxFillPipeline.from_pretrained("black-forest-labs/FLUX.1-Fill-dev", torch_dtype=torch.bfloat16)
         # self.pano_inpaint_pipeline.load_lora_weights(self.flux_lora_pano_path) # Antoine: Do not use the lora for inpainting, it yields worse results. TODO: maybe verify this further
         self.pano_inpaint_pipeline.enable_model_cpu_offload()
-        # pipe.enable_vae_tiling() #todo test with or without this?
+        self.pano_inpaint_pipeline.enable_vae_tiling() #todo test with or without this?
 
     @torch.no_grad()   
-    def inpaint_pano(self, prompt, pano_rgb, mask, seed_override=None):
+    def inpaint_pano(self, prompt, pano_rgb, mask, strength=1.0, height=None, width=None, seed_override=None):
         "pano_rgb, mask: PIL.Image"
 
         if not self.is_inpainting_model_init:
@@ -131,9 +131,9 @@ class SphericalDreamer:
             prompt=prompt,
             image=pano_rgb,  
             mask_image=mask, 
-            strength=1.0,
-            height=self.pano_height,
-            width=self.pano_width,
+            strength=strength,
+            height=height if height else self.pano_height,
+            width=width if width else self.pano_width,
             guidance_scale=30.0,
             num_inference_steps=50,
             max_sequence_length=512,
@@ -218,3 +218,23 @@ class SphericalDreamer:
             self.is_lama_init = True
 
         return Image.fromarray(self.lama_model(image, mask))
+
+    def _release_lama_memory(self):
+        if self.is_lama_init:
+            del self.lama_model
+            self.is_lama_init = False
+    
+    def _release_flux_memory(self):
+        if self.is_pano_generator_init:
+            del self.pano_gen_pipeline
+            self.is_pano_generator_init = False
+
+    def _release_flux_inpainting_memory(self):
+        if self.is_inpainting_model_init:
+            del self.pano_inpaint_pipeline
+            self.is_inpainting_model_init = False
+
+    def release_all_memory(self):
+        self._release_flux_memory()
+        self._release_flux_inpainting_memory()
+        self._release_lama_memory()

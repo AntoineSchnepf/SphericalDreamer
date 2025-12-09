@@ -8,3 +8,4 @@ wandb
 submodules
 **.ply
 TEST_O3D_RENDERING/
+_quick_and_dirty_ldi_images

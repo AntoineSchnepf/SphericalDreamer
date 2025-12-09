@@ -4,11 +4,18 @@ else
     config_name=$1
 fi
 
-echo Running 01_gen_panoramas.py...
-python3 01_gen_panoramas.py --config $config_name
+#1a Generate panoramas
+echo Running 01a_gen_panoramas.py...
+python3 01a_gen_panoramas.py --config $config_name
+
+#1b LDI generation
+echo Running 01b_ldi.py...
+python3 01b_ldi.py --config $config_name
+
+#2a Align pairs with inpainting
 echo Running 02a_align_pairs_inpainting.py...
 python3 02a_align_pairs_inpainting.py --config $config_name
-echo Running 02b_align_pairs_harmonic_blending.py...
-python3 02b_align_pairs_harmonic_blending.py --config $config_name
-echo Running 03_final_filling.py...
-# phase III is under implementation
+
+#2c Align pairs with harmonic blending
+echo Running 02c_align_pairs_harmonic_blending.py...
+python3 02c_align_pairs_harmonic_blending.py --config $config_name

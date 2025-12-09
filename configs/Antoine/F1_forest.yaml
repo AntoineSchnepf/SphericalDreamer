@@ -1,0 +1,12 @@
+# ---meta---
+expname: F1_forest
+
+# ----- args generation -----
+prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
+
+num_dreams: 5
+
+load_phase1_from: F1_forest
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase3_from: null

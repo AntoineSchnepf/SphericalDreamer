@@ -50,12 +50,64 @@ phase1: # panorama generation
 
 phase2: # pairs of sphere inpainting + deformation
   skip_inpainting: False
+  inpainting_resolution:
+    height: 1024
+    width: 2048
   excessive_pcd_logging: False
   rotate_intermediate_camera_by_deg: 0.0
   rendering_version: 0 # 0, 1 or 2
 
-phase3: #  final hole filling
-  skip_inpainting: False 
+phase_ldi: # layered depth image
+  masking:
+    edges_detection:
+      remove_depth_low_freq:
+        apply: True
+        method: gaussian # 'gaussian' or 'fourier'
+        fourier:
+          cutoff_frac: 0.01
+        gaussian:
+          sigma_v: 50.0
+          sigma_h: 50.0
+      canny:
+        low_t: 35
+        high_t: 90
+      sobel:
+        ksize: 3
+      depth_sharpening:
+        apply: True
+        filter_size: 5          
+        depth_threshold: 0.01   
+        sigma_s: 3.0            
+        sigma_r: 0.1            
+    segmask_detection: # parameters for SAM mask generation
+      points_per_side: 32 # was 16
+      pred_iou_thresh: 0.5 
+      stability_score_thresh: 0.6 
+      crop_n_layers: 0
+      crop_n_points_downscale_factor: 0
+      min_mask_region_area: 20 
+    segmask_scoring:
+      score_threshold: 0.02
+      max_edge_dist: 0 # tested 1: should be 0
+      step_along_normal: 1.0
+      min_pairs: 10 # was 30
+  inpainting:
+    mask_dilatation_px: 10
+    strength: 0.6
+    flux_inpainting_resolution: 
+      height: 1024
+      width: 2048
+    lama_inpainting_resolution: 
+      height: 512
+      width: 1024
+  depth_inpainting:
+    method: nearest # 'infusion', 'nearest' or 'bilinear_plus_nn'
+    additionnal_mask_dilation_px: 15
+    fill_holes: True
+  interactive_plot_results: False
+  
+
+  
 
 # tuned args
 depth_model: 360mono # in ['360mono', 'egformer']

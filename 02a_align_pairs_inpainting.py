@@ -55,6 +55,7 @@ def render_and_inpaint_from_pose(
         camera_pose, 
         height,
         width,
+        spherical_dreamer, 
         skip_inpainting, 
         prompt,
         masking_operations,
@@ -103,23 +104,26 @@ def render_and_inpaint_from_pose(
         pano_inpainted_raw = spherical_dreamer.inpaint_pano(
             prompt=prompt, 
             pano_rgb=my_utils.numpy_to_PIL(warped_img_interp), 
-            mask=my_utils.numpy_to_PIL(inpainting_mask)
-        )
+            mask=my_utils.numpy_to_PIL(inpainting_mask),
+            width=config.phase2.inpainting_resolution.width,
+            height=config.phase2.inpainting_resolution.height,
+        ).resize((width, height), resample=Image.LANCZOS)
+        # blending
+        pano_rgb_inpainted = spherical_dreamer.blend(
+            pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
+            pano_inpainted_raw=pano_inpainted_raw,
+            missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
+            blending_mode='compose', #TODO: add to cfg
+        ) #TODO: Check the blending strategy again. Maybe seamless is better ? 
         pano_inpainted_raw.save(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
+        pano_rgb_inpainted.save(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted.png"))
     else:
         pano_inpainted_raw = Image.open(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
+        pano_rgb_inpainted = Image.open(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted.png"))
 
 
-    # 7. Inpainting seamless blending
-    pano_rgb_inpainted = spherical_dreamer.blend(
-        pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
-        pano_inpainted_raw=pano_inpainted_raw,
-        missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
-        blending_mode='compose', #TODO: add to cfg
-    ) #TODO: Check the blending strategy again. Maybe seamless is better ? 
 
-
-    # 8. Estimate depth
+    # 7. Estimate depth
     # TODO: (Antoine, 16 OCT) LayerPANO3D Has a depth inpainting model, which may be better than this + harmonic blending. Worth testing.
     if not skip_inpainting:
         depth_estimated = spherical_dreamer.estimate_pano_depth(
@@ -146,10 +150,67 @@ def render_and_inpaint_from_pose(
     
     return res
 
+def get_sphere(dream, save_dir_, config, height, width): 
+
+    colors, depth = my_utils.load_rgbd_pano(
+        dream=dream,
+        save_dir_=save_dir_
+    )
+    colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
+            dream=dream,
+            save_dir_=save_dir_,
+            phase=1
+    )
+        
+    # optionnal upsampling
+    if config.pcd_upsampling_factor>1:
+        colors = my_utils.opencv_resize(colors, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+        depth = my_utils.opencv_resize(depth, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+    
+        colors_bg = my_utils.opencv_resize(colors_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+        depth_bg = my_utils.opencv_resize(depth_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+        mask_bg = my_utils.mask_resize(mask_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
+    
+    pts_carte = my_utils.depth2cam_carte(
+        depth=depth,
+        sphere_radius=config.sphere_radius,
+        height=height*config.pcd_upsampling_factor,
+        width=width*config.pcd_upsampling_factor,
+    )
+
+    pts_carte_bg = my_utils.depth2cam_carte(
+        depth=depth_bg,
+        sphere_radius=config.sphere_radius,
+        height=height*config.pcd_upsampling_factor,
+        width=width*config.pcd_upsampling_factor,
+    )
+    pts_carte_bg = pts_carte_bg[mask_bg]
+    colors_bg = colors_bg[mask_bg]
+    pts_carte = np.concatenate((pts_carte.reshape(-1, 3), pts_carte_bg.reshape(-1, 3)), axis=0)
+    colors =  np.concatenate((colors.reshape(-1, 3), colors_bg.reshape(-1, 3)), axis=0)
+
+
+    # correction pipeline
+    pts_carte_corrected, colors_corrected = my_utils.run_corrective_pipeline_on_sphere(
+        pts_carte, # in cartesian coordinates
+        colors, 
+        height*config.pcd_upsampling_factor,
+        width*config.pcd_upsampling_factor, 
+        **config.geometry_correction.sphere
+    )
+    sphere = my_utils.Sphere(
+        None, pts_carte_corrected, colors_corrected, 
+        forward_carte=translation_direction,
+        opening_kwargs=config.world_opening,
+    )
+
+    return sphere
+
+    
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
         debug=False, 
-        debug_parser_override=["--config", "forest.yaml"]
+        debug_parser_override=["--config", "Antoine/F0_forest.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
@@ -166,35 +227,14 @@ if __name__ == "__main__":
     printc(f"=== [PHASE 2a]  EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.load_phase2a_from:
         printc(f"=== {config.expname}: PHASE II.a : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
+        
         # PHASE II.a: INIT
-
-        colors1, depth1 = my_utils.load_rgbd_pano(
+        sphere1 = get_sphere(
             dream=0,
-            save_dir_=save_dir_
-        )
-
-        # Optional upsampling step to increase pointcloud density
-        if config.pcd_upsampling_factor>1:
-            colors1 = my_utils.opencv_resize(colors1, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-            depth1 = my_utils.opencv_resize(depth1, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-
-        pts1_carte = my_utils.depth2cam_carte(
-            depth=depth1,
-            sphere_radius=config.sphere_radius,
-            height=height*config.pcd_upsampling_factor,
-            width=width*config.pcd_upsampling_factor,
-        )
-        pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
-            pts1_carte, # in cartesian coordinates
-            colors1, 
-            height*config.pcd_upsampling_factor,
-            width*config.pcd_upsampling_factor, 
-            **config.geometry_correction.sphere
-        )
-        sphere1 = my_utils.Sphere(
-            None, pts1_carte_corrected, colors1_corrected, 
-            forward_carte=translation_direction,
-            opening_kwargs=config.world_opening,
+            save_dir_=save_dir_,
+            config=config,
+            height=height,
+            width=width
         )
         pose1 = pose_init
         sphere1.update_pose(pose1)
@@ -205,34 +245,12 @@ if __name__ == "__main__":
             save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
             os.makedirs(save_dir__, exist_ok=True)
 
-            # 1. Load new sphere and open it (left)
-            colors2, depth2 = my_utils.load_rgbd_pano(
+            sphere2 = get_sphere(
                 dream=i,
-                save_dir_=save_dir_
-            )
-            # Optional upsampling step to increase pointcloud density
-            if config.pcd_upsampling_factor>1:
-                colors2 = my_utils.opencv_resize(colors2, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-                depth2 = my_utils.opencv_resize(depth2, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-
-            pts2_carte = my_utils.depth2cam_carte(
-                depth=depth2,
-                sphere_radius=config.sphere_radius,
-                height=height*config.pcd_upsampling_factor,
-                width=width*config.pcd_upsampling_factor,
-            ) 
-            pts2_carte_corrected, colors2_corrected = my_utils.run_corrective_pipeline_on_sphere(
-                pts2_carte, 
-                colors2, 
-                height*config.pcd_upsampling_factor, 
-                width*config.pcd_upsampling_factor, 
-                **config.geometry_correction.sphere
-            )
-            
-            sphere2 = my_utils.Sphere(
-                None, pts2_carte_corrected, colors2_corrected, 
-                forward_carte=translation_direction,
-                opening_kwargs=config.world_opening,
+                save_dir_=save_dir_,
+                config=config,
+                height=height,
+                width=width
             )
 
             # 2. Move camera
@@ -248,7 +266,6 @@ if __name__ == "__main__":
             pose_intermediate = my_utils.camera_translation(pose_intermediate, np.array([0, 0, config.raise_intermediate_camera_by_z]))
             rotation_before_inpainting = my_utils.rotation_matrix_z(config.phase2.rotate_intermediate_camera_by_deg * np.pi / 180) 
             pose_intermediate[:3, :3] = rotation_before_inpainting @ pose_intermediate[:3, :3]
-            
 
 
             # 4. Generate missing points from pose, inpaint, estimate depth (inside function below)
@@ -271,6 +288,7 @@ if __name__ == "__main__":
                 camera_pose=pose_intermediate,
                 height=height,
                 width=width,
+                spherical_dreamer=spherical_dreamer, 
                 skip_inpainting=config.phase2.skip_inpainting, 
                 prompt=config.prompt,
                 masking_operations=masking_operations,

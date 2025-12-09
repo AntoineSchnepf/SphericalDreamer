@@ -13,25 +13,13 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.simplefilter("ignore", FutureWarning)
 
 import sys
-import cv2
 import numpy as np
-from PIL import Image, ImageOps
-import copy
-from functools import partial
-from skimage.segmentation import find_boundaries
-from scipy.ndimage import maximum_filter, minimum_filter
-
 import matplotlib.pyplot as plt
-import time
-import pickle as pkl
-from prodict import Prodict
 from pathlib import Path
-import pyfiglet
-import argparse
+
 # local imports
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
-from render_pcd import render_v2
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
 import my_utils
@@ -58,11 +46,11 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------- #
     # ---- PHASE 1. GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ----- #
     # ----------------------------------------------------------------- #
-    printc(f"=== [PHASE 1] EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== [PHASE 1-A] EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.load_phase1_from:
-        printc("=== PHASE 1: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ===", color='green')
+        printc("=== PHASE 1-A: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ===", color='green')
         for i in range(config.num_dreams):
-            printc(f"--- Dreaming Phase {i:02d} / {config.num_dreams} ---", color='yellow')
+            printc(f"--- Dreaming {i:02d} / {config.num_dreams} ---", color='yellow')
             # Generate panorama & Estimate Depth
             pano_rgb = spherical_dreamer.gen_pano(prompt=config.prompt, override_with_inpaint=config.phase1.override_with_inpaint, seed_override=seeds[i])
             depth = spherical_dreamer.estimate_pano_depth(pano_rgb=np.array(pano_rgb))
@@ -72,9 +60,9 @@ if __name__ == "__main__":
                 dream=i,
                 save_dir_=save_dir_
             )
-        printc("PHASE 1 SUCCESSFULLY COMPLETED!", color='green')
+        printc("PHASE 1-A SUCCESSFULLY COMPLETED!", color='green')
     else:
-        printc("SKIPPING PHASE 1: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH", color='magenta')
+        printc("SKIPPING PHASE 1-A: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH", color='magenta')
         printc(f"Loading instead from {config.load_phase1_from}", color='magenta')
         source_phase1_path = Path(config.save_dir) / config.load_phase1_from
         dest_phase1_path = Path(save_dir_)
