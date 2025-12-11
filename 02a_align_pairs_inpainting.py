@@ -222,13 +222,13 @@ if __name__ == "__main__":
     )
 
     # ------------------------------------------------------------ #
-    # ---- PHASE II.a ALIGN PAIRS OF SPHERES WITH INPAINTING  ---- #
+    # ---- PHASE 2-A ALIGN PAIRS OF SPHERES WITH INPAINTING  ---- #
     # ------------------------------------------------------------ #
-    printc(f"=== [PHASE 2a]  EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== [PHASE 2-A]  EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.load_phase2a_from:
-        printc(f"=== {config.expname}: PHASE II.a : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
+        printc(f"=== PHASE 2-A : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
         
-        # PHASE II.a: INIT
+        # INIT: load data for sphere1
         sphere1 = get_sphere(
             dream=0,
             save_dir_=save_dir_,
@@ -239,12 +239,13 @@ if __name__ == "__main__":
         pose1 = pose_init
         sphere1.update_pose(pose1)
 
-        # PHASE II.a: LOOP
+        # LOOP
         for i in range(1, config.num_dreams):
-            printc(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
+            printc(f"--- 2-A: Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
             save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
             os.makedirs(save_dir__, exist_ok=True)
 
+            # 1. Load data for sphere2
             sphere2 = get_sphere(
                 dream=i,
                 save_dir_=save_dir_,
@@ -339,9 +340,9 @@ if __name__ == "__main__":
             pose1 = pose2
 
 
-        printc("=== PHASE II.a SUCCESSFULLY COMPLETED! ===", color='green')
+        printc("=== PHASE 2-A SUCCESSFULLY COMPLETED! ===", color='green')
     else:
-        printc("SKIPPING PHASE II.a: ALIGN PAIRS + INPAINT", color='magenta')
+        printc("SKIPPING PHASE 2-A: ALIGN PAIRS + INPAINT", color='magenta')
         printc(f"Loading instead from {config.load_phase2a_from}", color='magenta')
         source_phase2a_path = Path(config.save_dir) / config.load_phase2a_from
         dest_phase2a_path = Path(save_dir_)

@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # TODO karim: add override functionality and save config
     config = my_utils.fetch_config_via_parser(
         debug=False, 
-        debug_parser_override=["--config", "forest.yaml"]
+        debug_parser_override=["--config", "F0_forest.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     if not config.load_phase1_from:
         printc("=== PHASE 1-A: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ===", color='green')
         for i in range(config.num_dreams):
-            printc(f"--- Dreaming {i:02d} / {config.num_dreams} ---", color='yellow')
+            printc(f"--- 1-A: Dreaming {i:02d} / {config.num_dreams} ---", color='yellow')
             # Generate panorama & Estimate Depth
             pano_rgb = spherical_dreamer.gen_pano(prompt=config.prompt, override_with_inpaint=config.phase1.override_with_inpaint, seed_override=seeds[i])
             depth = spherical_dreamer.estimate_pano_depth(pano_rgb=np.array(pano_rgb))

@@ -14,6 +14,7 @@ sys.path.append(_360monodepth_install_dir)
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
 import my_utils
+from typing import Union
 
 logging.disable(logging.CRITICAL + 1)
 
@@ -69,7 +70,25 @@ class SphericalDreamer:
 
         return pano_rgb
     
-    def estimate_pano_depth(self, pano_rgb:np.array):
+    def estimate_pano_depth(self, pano_rgb:Union[Image.Image, np.array]):
+        """
+        args:
+            `pano_rgb`: PIL/np.array of shape [pano_h,pano_w,3] and values in [0-255]        
+        returns:
+            pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1]
+        """
+        # --- Convert PIL → numpy ---
+        if isinstance(pano_rgb, Image.Image):
+            pano_rgb = np.array(pano_rgb)
+
+        # --- Ensure uint8 RGB in [0, 255] ---
+        if pano_rgb.dtype != np.uint8:
+            # If float in [0,1], scale up
+            if pano_rgb.max() <= 1.0:
+                pano_rgb = (pano_rgb * 255).clip(0, 255).astype(np.uint8)
+            else:
+                raise ValueError(f"pano_rgb has dtype {pano_rgb.dtype} with max value {pano_rgb.max()}. Expected uint8 in [0,255] or float in [0,1].")
+
         if self .depth_model == '360mono':
             return self.estimate_pano_depth_360mono(pano_rgb)
         elif self.depth_model == 'egformer':
@@ -78,10 +97,10 @@ class SphericalDreamer:
             raise ValueError(f"Unknown depth model: {self.depth_model}. Should be either '360mono' or 'egformer'.")
         
     @torch.no_grad()
-    def estimate_pano_depth_360mono(self, pano_rgb:np.array):
+    def estimate_pano_depth_360mono(self, pano_rgb:Union[Image.Image, np.array]):
         """
         args:
-            `pano_rgb`: np.array of shape [pano_h,pano_w,3] and values in [0-255]        
+            `pano_rgb`: PIL/np.array of shape [pano_h,pano_w,3] and values in [0-255]        
         returns:
             pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1]
         """

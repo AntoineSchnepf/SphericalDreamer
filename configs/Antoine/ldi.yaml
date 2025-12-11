@@ -1,0 +1,15 @@
+# ---meta---
+expname: ldi
+
+# ----- args generation -----
+prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
+
+
+phase_ldi: # layered depth image
+  depth_inpainting:
+    additionnal_mask_dilation_px: 0
+    fill_holes: True
+    pad_width: 150
+    apply_post_processing: False
+  
+

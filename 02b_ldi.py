@@ -29,7 +29,8 @@ sys.path.append(_360monodepth_install_dir)
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
 
-
+phase2a_output_prefix = "02a_"
+output_prefix = "02b_"
 
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
@@ -47,42 +48,49 @@ if __name__ == "__main__":
     )
 
     # ----------------------------------------------------------------- #
-    # ------------ PHASE 1-B. BACKGROUND RGBD INPAINTING -------------- #
+    # ------------ PHASE 2-B. BACKGROUND RGBD INPAINTING -------------- #
     # ----------------------------------------------------------------- #
-    printc(f"=== [PHASE 1-B] EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== [PHASE 2-B] EXPERIMENT: {config.expname} ===", color='cyan')
     # if not config.load_phase1_from:
-    if True: # @ TODO: Karim disabling skipping for now. Can you fix it later ?
-        printc("=== PHASE 1-B: BACKGROUND RGBD INPAINTING ===", color='green')
+    if True: # TODO: @Karim. Disabling skipping for now. Can you fix it later ?
+        printc("=== PHASE 2-B: BACKGROUND RGBD INPAINTING ===", color='green')
 
         # -----------------------------
         # 0. LOAD INPUT IMAGES + DEPTH
         # -----------------------------
         list_img = []
         list_depth_origin = []
-        for i in range(config.num_dreams):
-            printc(f"--- 1-B: load image  {i:02d} / {config.num_dreams} ---", color='yellow')
+        for i in range(1, config.num_dreams):
+            printc(f"--- 2-B: load image  {i:02d} / {config.num_dreams} ---", color='yellow')
 
-            img, depth_origin = my_utils.load_rgbd_pano(
-                dream=i,
-                save_dir_=save_dir_
-            )
-            list_img.append(img)
-            list_depth_origin.append(depth_origin)
+            save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
+
+            data =  np.load(f"{save_dir__}/{phase2a_output_prefix}YY_other.npy", allow_pickle=True).item()
+            
+            depth_estimated       = data['depth_estimated']
+            # pose_intermediate     = data['pose_intermediate']
+            # warped_img_interp     = data['warped_img_interp']
+            # warped_depth_interp   = data['warped_depth_interp']
+            pano_rgb_inpainted    = data['pano_rgb_inpainted']
+            # missing_info_mask     = data['missing_info_mask']
+
+            list_img.append(my_utils.PIL_to_numpy(pano_rgb_inpainted))
+            list_depth_origin.append(depth_estimated)
 
         # ---------------------------------------
-        # 1. COMPUTE MASK FOR FOREGROUND OBJECTS
+        # I. COMPUTE MASK FOR FOREGROUND OBJECTS
         # ---------------------------------------
         t0 = time.time()
         list_mask = []
         sam, mask_generator = ldi.instanciate_sam(config)
 
-        for i in range(config.num_dreams):
-            printc(f"--- 1-B: Compute mask for foreground object  {i:02d} / {config.num_dreams} ---", color='yellow')
+        for i in range(1, config.num_dreams):
+            printc(f"--- 2-B: Compute mask for foreground object  {i:02d} / {config.num_dreams} ---", color='yellow')
             mask = ldi.get_foreground_segmask(
                 config,
                 mask_generator, 
-                list_img[i],
-                list_depth_origin[i],
+                list_img[i-1],
+                list_depth_origin[i-1],
                 plot_results=plot_results,
             )
             list_mask.append(mask)
@@ -93,7 +101,7 @@ if __name__ == "__main__":
         print(f"Foreground mask computed in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
         # ------------------------
-        # 2. INPAINTING WITH LAMA
+        # II. INPAINTING WITH LAMA
         # ------------------------
         t0 = time.time()
         list_prompt=[]
@@ -102,15 +110,15 @@ if __name__ == "__main__":
         list_viz_kwargs = []
         llm_model, processor = ldi.instanciate_llm_and_processor()
 
-        for i in range(config.num_dreams):
-            printc(f"--- 1-B: Lama Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+        for i in range(1, config.num_dreams):
+            printc(f"--- 2-B: Lama Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
             prompt, mask_smooth_pil, inpaint_pano_lama_pil, viz_kwargs = ldi.lama_flux_double_inpainting_p1(
                 config,
                 spherical_dreamer,
                 llm_model,
                 processor,
-                image=list_img[i],
-                mask=list_mask[i],
+                image=list_img[i-1],
+                mask=list_mask[i-1],
             )
             list_prompt.append(prompt)
             list_mask_smooth_pil.append(mask_smooth_pil)
@@ -124,22 +132,22 @@ if __name__ == "__main__":
         print(f"Lama inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
         # --------------------------
-        # 3. INPAINTING WITH FLUX
+        # III. INPAINTING WITH FLUX
         # --------------------------
 
         t0 = time.time()
         list_inpaint_mask_pil = []
         list_inpaint_pano_pil = []
 
-        for i in range(config.num_dreams):
-            printc(f"--- 1-B: Flux Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+        for i in range(1, config.num_dreams):
+            printc(f"--- 2-B: Flux Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
             inpaint_pano_pil, inpaint_mask_pil = ldi.lama_flux_double_inpainting_p2(
                 config,
                 spherical_dreamer,
-                list_prompt[i],
-                list_mask_smooth_pil[i],
-                list_inpaint_pano_lama_pil[i],
-                list_viz_kwargs[i],
+                list_prompt[i-1],
+                list_mask_smooth_pil[i-1],
+                list_inpaint_pano_lama_pil[i-1],
+                list_viz_kwargs[i-1],
                 plot_results=plot_results,
             )
             list_inpaint_mask_pil.append(inpaint_mask_pil)
@@ -150,7 +158,7 @@ if __name__ == "__main__":
         print(f"FLUX inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
         # -------------------------------------------------
-        # 4. DEPTH INPAINTING (at resolution 1024 * 2048)
+        # III. DEPTH INPAINTING (at resolution 1024 * 2048)
         # -------------------------------------------------
         t0 = time.time()
         list_depth_inpainted = []
@@ -159,14 +167,14 @@ if __name__ == "__main__":
         if config.phase_ldi.depth_inpainting.method == "infusion":
             pipe_dp = ldi.instanciate_pipe_dp()
 
-        for i in range(config.num_dreams):
-            printc(f"--- 1-B: Depth Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+        for i in range(1, config.num_dreams):
+            printc(f"--- 2-B: Depth Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
 
             img_pil, depth_origin, inpaint_mask_pil_, inpaint_mask_bool_ = ldi.prepare_inpainting(
                 config,
-                list_img[i],
-                list_depth_origin[i],
-                list_inpaint_mask_pil[i],
+                list_img[i-1],
+                list_depth_origin[i-1],
+                list_inpaint_mask_pil[i-1],
             )
 
             if config.phase_ldi.depth_inpainting.method == "harmonic_blending":
@@ -188,7 +196,7 @@ if __name__ == "__main__":
                 depth_inpainted = ldi.inpaint_bg_depth(
                     image=img_pil,
                     depth=depth_origin,
-                    image_bg=list_inpaint_pano_pil[i],
+                    image_bg=list_inpaint_pano_pil[i-1],
                     bg_mask=inpaint_mask_pil,
                     pipe_dp=pipe_dp,
                     rescale_to_min_depth=True,
@@ -228,16 +236,16 @@ if __name__ == "__main__":
         print(f"Depth inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images with method {config.phase_ldi.depth_inpainting.method}.")
 
         # SAVE RESULTS
-        for i in range(config.num_dreams):
+        for i in range(1, config.num_dreams):
             my_utils.save_rgbd_ldi_pano(
-                pano_rgb_bg=list_inpaint_pano_pil[i],
-                depth_bg=list_depth_inpainted[i],
-                mask_bg=my_utils.pil_mask_to_numpy_bool(list_inpaint_mask_pil[i]),
+                pano_rgb_bg=list_inpaint_pano_pil[i-1],
+                depth_bg=list_depth_inpainted[i-1],
+                mask_bg=my_utils.pil_mask_to_numpy_bool(list_inpaint_mask_pil[i-1]),
                 dream=i,
                 save_dir_=save_dir_,
-                phase=1
+                phase=2
             ) 
         printc("PHASE 1-B SUCCESSFULLY COMPLETED!", color='green')
     else:
         printc("SKIPPING PHASE 1-B: BACKGROUND RGBD INPAINTING", color='magenta')
-        # TODO: Karim should implement its skipping strategy here.
+        # TODO: Karim should implement his skipping strategy here.

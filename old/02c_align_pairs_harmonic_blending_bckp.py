@@ -1,3 +1,7 @@
+# BACKUP BEFORE INTEGRATING LDI INPAINTING CHANGES
+
+
+
 import os
 import warnings
 import logging
@@ -36,7 +40,7 @@ import pyfiglet
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
 from render_pcd import render_v2
-from harmonic_blending import harmonic_blend_of_depths_ldi, naive_blend_of_depths
+from harmonic_blending import harmonic_blend_of_depths, naive_blend_of_depths
 import my_utils
 from my_utils import printc
 with contextlib.redirect_stdout(StringIO()):
@@ -44,8 +48,7 @@ with contextlib.redirect_stdout(StringIO()):
     from utils.depth_alignment import Pano_depth_estimation
 
 phase2a_output_prefix = "02a_"
-phase2b_output_prefix = "02b_"
-output_prefix = "02c_"
+output_prefix = "02b_"
 
 
 def align_new_points(
@@ -59,10 +62,7 @@ def align_new_points(
         width,
         sphere_radius,
         upsampling_factor,
-        where_save=None,
-        ldi_depth=None,
-        ldi_colors=None,
-        ldi_mask=None,
+        where_save=None
 ):
     # 9. Blend depth
     new_colors = (np.array(pano_rgb_inpainted)/255.0)
@@ -77,25 +77,8 @@ def align_new_points(
         # sanity check
         where_depth_nan_resized = np.isnan(warped_depth_interp)
         if np.any(where_depth_nan_resized & (~missing_info_mask)):
-            print("IMPORTANT WARNING: resized depth has NaNs in ninpainted info regions!")
-            print(f"Percent of NaNs: {np.mean(where_depth_nan_resized & (~missing_info_mask))*100:.2f}%")
-            print("Expanding missing info mask to include these regions.")
-            # we want all nans in missing info mask
-            missing_info_mask = missing_info_mask | where_depth_nan_resized
-            
-        if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
-            assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
-            ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="nearest") #FLAG: Depth Resize
-            ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-            ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
+            print("IMPORTANT WARNING: resized depth has NaNs in non-missing info regions!")
 
-            where_ldi_depth_nan_resized = np.isnan(ldi_depth)
-            if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
-                print("IMPORTANT WARNING: resized ldi depth has NaNs in ldi regions!")
-                print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan_resized & (ldi_mask))*100:.2f}%")
-                print("Expanding ldi mask to include these regions.")
-                # we want zeros nans in ldi mask
-                ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
 
     # (Naive blending)
     # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
@@ -114,7 +97,7 @@ def align_new_points(
     )
 
     # (Harmonic blending)
-    res = harmonic_blend_of_depths_ldi(
+    pts_deformed_world, new_colors, pcd_harmonic, blended_depth_harmonic = harmonic_blend_of_depths(
         colors=new_colors,
         warped_depth_interp=warped_depth_interp,
         depth_estimated=depth_estimated,
@@ -125,18 +108,10 @@ def align_new_points(
         width=width*upsampling_factor,
         logging=True,
         output_prefix=output_prefix,
-        where_save=where_save,
-
-        #ldi args
-        ldi_depth=ldi_depth,
-        ldi_colors=ldi_colors, 
-        ldi_mask=ldi_mask,
+        where_save=where_save
     )
 
-    res['pcd_naive'] = pcd_naive
-    res['blended_depth_naive'] = blended_depth_naive
-
-    return res
+    return pts_deformed_world, new_colors, pcd_naive, pcd_harmonic
 
 def split_new_points(pts, colors, pose1, pose2, forward):
     # (Antoine, 16 Oct) This function will pose problems if we want to do anything different than a straight line path.
@@ -206,7 +181,7 @@ def is_point_in_camera_forward_space(point_positions,
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
         debug=False, 
-        debug_parser_override=["--config", "Antoine/F0_forest.yaml"]
+        debug_parser_override=["--config", "forest.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
@@ -218,18 +193,19 @@ if __name__ == "__main__":
     )
 
     # -------------------------------------------------------------------- #
-    # ---- PHASE 2-C ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING  ----- #
+    # ---- PHASE II.b ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING  ----- #
     # -------------------------------------------------------------------- #
-    printc(f"=== [PHASE 2-C]  EXPERIMENT: {config.expname} ===", color='cyan')
-    if not config.load_phase2c_from:
-        printc(f"=== PHASE 2-C : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
-
+    printc(f"=== [PHASE 2b]  EXPERIMENT: {config.expname} ===", color='cyan')
+    if not config.load_phase2b_from:
+        printc(f"=== {config.expname}: PHASE II.b : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
+        # PHASE II.b: INIT
         pointclouds = {}
         all_pts_world = np.array([]).reshape(0, 3)
         all_colors_world = np.array([]).reshape(0, 3)
 
+        # PHASE II.b: LOOP
         for i in range(1, config.num_dreams):
-            print(f"--- 2-C: Inpainting+Alignment {i:02d} / {config.num_dreams-1} ---")
+            print(f"--- Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---")
             save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
 
             sphere1=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, phase2a_output_prefix+"YY_sphere1.pkl"))
@@ -237,32 +213,16 @@ if __name__ == "__main__":
             pose1=sphere1.pose
             pose2=sphere2.pose
 
-            data_YY = np.load(f"{save_dir__}/{phase2a_output_prefix}YY_other.npy", allow_pickle=True).item()
+            data = np.load(f"{save_dir__}/{phase2a_output_prefix}YY_other.npy", allow_pickle=True).item()
 
-            depth_estimated       = data_YY['depth_estimated']
-            pose_intermediate     = data_YY['pose_intermediate']
-            warped_img_interp     = data_YY['warped_img_interp']
-            warped_depth_interp   = data_YY['warped_depth_interp']
-            pano_rgb_inpainted    = data_YY['pano_rgb_inpainted']
-            missing_info_mask     = data_YY['missing_info_mask']
+            depth_estimated       = data['depth_estimated']
+            pose_intermediate     = data['pose_intermediate']
+            warped_img_interp     = data['warped_img_interp']
+            warped_depth_interp   = data['warped_depth_interp']
+            pano_rgb_inpainted    = data['pano_rgb_inpainted']
+            missing_info_mask     = data['missing_info_mask']
 
-            if config.phase2.apply_ldi:
-
-                colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
-                    dream=i,
-                    save_dir_=save_dir_,
-                    phase=2
-                )
-                ldi_colors =   colors_bg
-                ldi_depth  =   depth_bg
-                ldi_mask   =   mask_bg
-            
-            else:
-                ldi_colors   = None
-                ldi_depth = None
-                ldi_mask  = None
-
-            res = align_new_points(
+            new_pts, new_colors, pcd_naive, pcd_harmonic = align_new_points(
                 warped_img_interp=warped_img_interp,
                 warped_depth_interp=warped_depth_interp,
                 pano_rgb_inpainted=pano_rgb_inpainted,
@@ -273,17 +233,9 @@ if __name__ == "__main__":
                 width=width,
                 sphere_radius=config.sphere_radius,
                 upsampling_factor=config.pcd_upsampling_factor,
-                where_save=save_dir__,
-                ldi_depth=ldi_depth,
-                ldi_colors=ldi_colors,
-                ldi_mask=ldi_mask,
+                where_save=save_dir__
             )
-            new_pts=res['pts_out']
-            new_colors=res['colors_out']
-
             if config.phase2.excessive_pcd_logging:
-                pcd_naive=res['pcd_naive']
-                pcd_harmonic=res['pcd_harmonic']
                 pointclouds[f"inpaint_{i:02d}"] = {}
                 pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
                 pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
@@ -293,26 +245,10 @@ if __name__ == "__main__":
                 )
 
             # 10. Add new points to their corresponding spheres.
+            # TODO(Antoine, 26 Nov) Verifier que j'ai pas fait de la merde ici
             (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
                 new_pts, new_colors, pose1, pose2, translation_direction
             )
-            
-            if config.phase2.apply_ldi:
-                new_pts_ldi=res['pts_out_ldi']
-                new_colors_ldi=res['colors_out_ldi']
-
-                (new_pts_1_ldi, new_colors_1_ldi), (new_pts_2_ldi, new_colors_2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
-                    new_pts_ldi, new_colors_ldi, pose1, pose2, translation_direction
-                )
-
-                new_pts1           = np.concatenate((new_pts1,           new_pts_1_ldi), axis=0)
-                new_colors1        = np.concatenate((new_colors1,        new_colors_1_ldi), axis=0)
-                new_pts2           = np.concatenate((new_pts2,           new_pts_2_ldi), axis=0)
-                new_colors2        = np.concatenate((new_colors2,        new_colors_2_ldi), axis=0)
-                new_pts_neutral    = np.concatenate((new_pts_neutral,    new_pts_neutral_ldi), axis=0)
-                new_colors_neutral = np.concatenate((new_colors_neutral, new_colors_neutral_ldi), axis=0)
-
-
             sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
             sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
 
@@ -347,7 +283,7 @@ if __name__ == "__main__":
             with open(os.path.join(save_dir_, output_prefix+"pointclouds_zoo.pkl"), 'wb') as f:
                 pkl.dump(pointclouds, f)
 
-        # END OF PHASE 2: final pcd save
+        # END OF PHASE II: final pcd save
         with open(os.path.join(save_dir_, output_prefix+"raw_dream_pcd.pkl"), 'wb') as f:
             pkl.dump(
                 my_utils.PointCloud(
@@ -355,15 +291,15 @@ if __name__ == "__main__":
                     colors=all_colors_world
                 ), f)
 
-        print("PHASE 2-C SUCCESSFULLY COMPLETED!")
+        print("PHASE II.b SUCCESSFULLY COMPLETED!")
     else:
-        printc("SKIPPING PHASE 2-C: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
-        printc(f"Loading instead from {config.load_phase2c_from}", color='magenta')
-        source_phase2c_path = Path(config.save_dir) / config.load_phase2c_from
-        dest_phase2c_path = Path(save_dir_)
+        printc("SKIPPING PHASE II.b: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
+        printc(f"Loading instead from {config.load_phase2b_from}", color='magenta')
+        source_phase2b_path = Path(config.save_dir) / config.load_phase2b_from
+        dest_phase2b_path = Path(save_dir_)
         my_utils.copy_phase_folders(
             folder_start_with="align_",
             item_start_with=output_prefix,
-            source_dir=source_phase2c_path,
-            dest_dir=dest_phase2c_path
+            source_dir=source_phase2b_path,
+            dest_dir=dest_phase2b_path
         )

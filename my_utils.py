@@ -117,11 +117,14 @@ def copy_phase_folders(folder_start_with: str, item_start_with: str,
                     else:
                         shutil.copy2(sub, dst_item)
 
-def fetch_config_via_parser(debug, debug_parser_override=[]):
+def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
     repo_path = os.path.dirname(os.path.realpath(__file__))
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default="_default.yaml")
     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+    # TODO: remove lines below
+    parser.add_argument('--img_name', type=str, default='FD0')
+    print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
 
     # ---- script args ----
     if debug:
@@ -132,6 +135,10 @@ def fetch_config_via_parser(debug, debug_parser_override=[]):
         args = parser.parse_args()
 
     config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
+    
+    if return_img_name:
+        return config, args.img_name
+    
     return config
 
 def setup(config):
@@ -957,11 +964,11 @@ def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, dream, save_dir_, phase):
         raise ValueError("phase must be 1 or 2, received:", phase)
     
     os.makedirs(save_dir__, exist_ok=True)
-    pano_rgb_bg.save(os.path.join(save_dir__, "YY_pano_rgb_bg.png"))
-    np.save(os.path.join(save_dir__, "YY_depth_bg.npy"), depth_bg)
-    depth_numpy_to_PIL(depth_bg).save(os.path.join(save_dir__, "depth_bg.png"))
-    depth_numpy_to_figure(depth_bg).savefig(os.path.join(save_dir__, "YY_depth_bg_figure.png"))
-    numpy_bool_to_pil_mask(mask_bg).save(os.path.join(save_dir__, "YY_mask_bg.png"))
+    pano_rgb_bg.save(os.path.join(save_dir__, "ZZ_ldi_pano_rgb.png"))
+    np.save(os.path.join(save_dir__, "ZZ_ldi_depth.npy"), depth_bg)
+    depth_numpy_to_PIL(depth_bg).save(os.path.join(save_dir__, "ZZ_ldi_depth.png"))
+    depth_numpy_to_figure(depth_bg).savefig(os.path.join(save_dir__, "ZZ_ldi_depth_figure.png"))
+    numpy_bool_to_pil_mask(mask_bg).save(os.path.join(save_dir__, "ZZ_ldi_mask.png"))
 
 def load_rgbd_ldi_pano(dream, save_dir_, phase):
     if phase == 1:
@@ -971,10 +978,10 @@ def load_rgbd_ldi_pano(dream, save_dir_, phase):
     else:
         raise ValueError("phase must be 1 or 2, received:", phase)
     
-    pano_rgb_bg = Image.open(os.path.join(load_dir__, "YY_pano_rgb_bg.png"))
+    pano_rgb_bg = Image.open(os.path.join(load_dir__, "ZZ_ldi_pano_rgb.png"))
     colors_bg = PIL_to_numpy(pano_rgb_bg)
-    depth_bg = np.load(os.path.join(load_dir__, "YY_depth_bg.npy"))
-    mask_bg = pil_mask_to_numpy_bool(Image.open(os.path.join(load_dir__, "YY_mask_bg.png")))
+    depth_bg = np.load(os.path.join(load_dir__, "ZZ_ldi_depth.npy"))
+    mask_bg = pil_mask_to_numpy_bool(Image.open(os.path.join(load_dir__, "ZZ_ldi_mask.png")))
 
     return colors_bg, depth_bg, mask_bg
 

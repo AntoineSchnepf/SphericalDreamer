@@ -5,6 +5,7 @@ skip_phase3: True
 load_phase1_from: null
 load_phase2a_from: null
 load_phase2b_from: null
+load_phase2c_from: null
 load_phase3_from: null
 
 
@@ -56,6 +57,7 @@ phase2: # pairs of sphere inpainting + deformation
   excessive_pcd_logging: False
   rotate_intermediate_camera_by_deg: 0.0
   rendering_version: 0 # 0, 1 or 2
+  apply_ldi: True
 
 phase_ldi: # layered depth image
   masking:
@@ -101,9 +103,11 @@ phase_ldi: # layered depth image
       height: 512
       width: 1024
   depth_inpainting:
-    method: nearest # 'infusion', 'nearest' or 'bilinear_plus_nn'
-    additionnal_mask_dilation_px: 15
+    method: bilinear_plus_nn # 'harmonic_blending', 'infusion', 'nearest' or 'bilinear_plus_nn'
+    additionnal_mask_dilation_px: 0
     fill_holes: True
+    pad_width: 150
+    apply_post_processing: True
   interactive_plot_results: False
   
 
