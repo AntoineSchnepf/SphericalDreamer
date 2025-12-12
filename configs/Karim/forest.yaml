@@ -13,6 +13,7 @@ num_dreams: 5
   
 
 phase4: # render video
+  point_size: 5.0
   fix_world: True
   render_settings:
     trajectory: walk # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
@@ -22,6 +23,6 @@ phase4: # render video
       fpd_e: 1
       fpd_a: 1
   world:
-    correct_depth: True
+    correct_depth: False
   remove_outliers:
     apply: True
