@@ -28,7 +28,7 @@ config = my_utils.fetch_config_via_parser(
 
 repo_path = os.path.dirname(os.path.realpath(__file__))
 t0 = time.time()
-with open(f"{repo_path}/{config.save_dir}/{config.expname}/02b_raw_dream_pcd.pkl", "rb") as f:
+with open(f"{repo_path}/{config.save_dir}/{config.expname}/02c_raw_dream_pcd.pkl", "rb") as f:
     PointCloud_instance = pickle.load(f)
 
 printc(f"Loaded raw point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
