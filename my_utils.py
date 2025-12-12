@@ -1002,30 +1002,6 @@ class PointCloud:
         pcd.colors = o3d.utility.Vector3dVector(self.colors)
         return pcd
 
-    # def get_o3d_pointcloud(self):
-    #     import open3d as o3d
-    #     t = o3d.core.Tensor(self.pts)
-    #     pcd = o3d.t.geometry.PointCloud(t)
-    #     pcd.point['colors'] = o3d.core.Tensor(self.colors)
-    #     self.pcd = pcd
-    #     return self
-
-    # @property
-    # def points(self):
-    #     return self.pcd.point['points']
-
-    # @property
-    # def colors(self):
-    #     return self.pcd.point['colors']
-
-    # @points.setter
-    # def points(self, new_points):
-    #     self.pcd.point['points'] = o3d.core.Tensor(new_points)
-
-    # @colors.setter
-    # def colors(self, new_colors):
-    #     self.pcd.point['colors'] = o3d.core.Tensor(new_colors)
-
 class SphereState:
     def __init__(self, pts_carte, colors, pose):
         """everything in spherical coordinates"""
