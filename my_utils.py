@@ -2276,7 +2276,7 @@ class GeometryTransforms:
         return pts_prime
 
     @staticmethod
-    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8):
+    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8, verbose=False):
         """
         Remove statistical outliers from a point cloud using Open3D's 
         statistical outlier removal (SOR) filter.
@@ -2320,10 +2320,16 @@ class GeometryTransforms:
         - Only inliers are returned; outliers are discarded.
         """
         import open3d as o3d
+        size_before = pts.size // 3
+        t0 = time.time()
         pcd = PointCloud(pts, colors).get_o3d_pointcloud()
         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
         inlier_pts = np.asarray(cl.points)
         inlier_colors = np.asarray(cl.colors)
+        if verbose:
+            size_after = inlier_pts.size // 3
+            print(f"Removed {100 * (size_before - size_after) / size_before:.2f}% outliers from background point cloud in {time.time() - t0:.2f} seconds.")
+
         return inlier_pts, inlier_colors
 
     @staticmethod
@@ -2406,10 +2412,6 @@ class GeometryTransforms:
 
         return pts_cam_cartesian, colors
 
-_default_outlier_removal_options = {
-    'nb_neighbors': 20,
-    'std_ratio': 1.8,
-}
 def run_corrective_pipeline_on_sphere(
         pts, # in cartesian coordinates (local camera frame)
         colors, 
@@ -2421,8 +2423,6 @@ def run_corrective_pipeline_on_sphere(
         correct_floor, 
         depth_threshold_for_floor_correction, 
         remove_sky=False, 
-        remove_outliers=True, 
-        outlier_removal_options=_default_outlier_removal_options,
         verbose=False,
         plot=False,
     ):
@@ -2502,7 +2502,8 @@ def run_corrective_pipeline_on_sphere(
             print("d. (Optional) Sky Removed.")
 
     # 7. Remove statistical outliers
-    if remove_outliers: 
+    if False: 
+        # depreciated: use the options passed from outside
         n_before = len(final_pts.reshape(-1,3))
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,
@@ -2528,8 +2529,6 @@ def run_corrective_pipeline_on_world(
     correct_walls, 
     correct_floor, 
     depth_threshold_for_floor_correction, 
-    remove_outliers,
-    outlier_removal_options=_default_outlier_removal_options,
     verbose=False,
     plot=False,
 ):
@@ -2628,8 +2627,6 @@ def run_corrective_pipeline_on_world(
         final_pts[~mask_keep_right] = pts_right
 
 
-    
-
     # 5. Correct Floor
     if correct_floor:
         if correct_depth:
@@ -2657,7 +2654,8 @@ def run_corrective_pipeline_on_world(
             print("b. Cylindrical Floor Corrected.")
 
     # 7. Remove statistical outliers
-    if remove_outliers: 
+    if False: 
+        # depreciated
         n_before = len(final_pts.reshape(-1,3))
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,

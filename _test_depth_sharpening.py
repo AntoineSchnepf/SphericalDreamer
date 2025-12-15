@@ -398,7 +398,7 @@ def visualize_canny_sobel_edges(image, depth_origin, depth, depth_sharpened, edg
 
     # Canny edges (optional)
     ax[5].imshow(edges_canny, cmap="gray")
-    ax[5].set_title("Canny edges (on Sobel magnitude)")
+    ax[5].set_title("Canny edges")
     ax[5].axis("off")
 
     # Empty / reserved
@@ -456,11 +456,11 @@ if __name__ == "__main__":
     config.pcd_upsampling_factor = int(pcd_upsampling_factor)
 
           
-    config.phase_ldi.masking.edges_detection.depth_sharpening.apply = True
-    config.phase_ldi.masking.edges_detection.depth_sharpening.filter_size = 5          
-    config.phase_ldi.masking.edges_detection.depth_sharpening.depth_threshold = 0.01   
-    config.phase_ldi.masking.edges_detection.depth_sharpening.sigma_s = 3.0         
-    config.phase_ldi.masking.edges_detection.depth_sharpening.sigma_r = 0.1  
+    config.ldi.masking.edges_detection.depth_sharpening.apply = True
+    config.ldi.masking.edges_detection.depth_sharpening.filter_size = 5          
+    config.ldi.masking.edges_detection.depth_sharpening.depth_threshold = 0.01   
+    config.ldi.masking.edges_detection.depth_sharpening.sigma_s = 3.0         
+    config.ldi.masking.edges_detection.depth_sharpening.sigma_r = 0.1  
     
 
     opening_kwargs = {
@@ -503,7 +503,7 @@ if __name__ == "__main__":
         depth_sharpened = sharpen_depth_sparse_bilateral(
             depth=depth1,
             image=(colors1*255).astype(np.uint8),
-            config=config.phase_ldi.masking.edges_detection.depth_sharpening,
+            config=config.ldi.masking.edges_detection.depth_sharpening,
             mask=None,
             num_iter=None,  # will infer from config
         )
@@ -521,9 +521,9 @@ if __name__ == "__main__":
         depth_sharpened = depth1
 
     if apply_canny_edge_removal:
-        edges_sobel = sobel_edges_from_depth(depth1, mask=None, ksize=config.phase_ldi.masking.edges_detection.sobel.ksize)
-        # edges_canny = canny_edges_from_depth(depth1, mask=None, low=config.phase_ldi.masking.edges_detection.canny.low_t, high=config.phase_ldi.masking.edges_detection.canny.high_t)
-        edges_low_t = 35 # Antoine: Maybe take it from       config.phase_ldi.masking.edges_detection.canny.low_t: 35
+        edges_sobel = sobel_edges_from_depth(depth1, mask=None, ksize=config.ldi.masking.edges_detection.sobel.ksize)
+        # edges_canny = canny_edges_from_depth(depth1, mask=None, low=config.ldi.masking.edges_detection.canny.low_t, high=config.ldi.masking.edges_detection.canny.high_t)
+        edges_low_t = 35 # Antoine: Maybe take it from       config.ldi.masking.edges_detection.canny.low_t: 35
         edges = (edges_sobel > edges_low_t).astype(bool)
 
         colors1[edges] = np.nan  # black out edges in color

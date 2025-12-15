@@ -113,7 +113,7 @@ def render_and_inpaint_from_pose(
             mask=my_utils.numpy_to_PIL(inpainting_mask),
             width=config.phase2.inpainting_resolution.width,
             height=config.phase2.inpainting_resolution.height,
-        ).resize((width, height), resample=Image.LANCZOS)
+        ).resize((width, height), resample=Image.LANCZOS) # FLAG: resize here is not optimal. We loose some resolution here. 
         # blending
         pano_rgb_inpainted = spherical_dreamer.blend(
             pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
@@ -158,26 +158,17 @@ def render_and_inpaint_from_pose(
 
 def get_sphere(dream, save_dir_, config, height, width): 
 
+    # 1. Load RGBD pano
     colors, depth = my_utils.load_rgbd_pano(
         dream=dream,
         save_dir_=save_dir_,
         phase=_phase_1a
     )
 
-    colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
-            dream=dream,
-            save_dir_=save_dir_,
-            phase=_phase_1b
-    )
-        
-    # optionnal upsampling
+    # 2. (Optional) upsampling
     if config.pcd_upsampling_factor>1:
         colors = my_utils.opencv_resize(colors, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
         depth = my_utils.opencv_resize(depth, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-    
-        colors_bg = my_utils.opencv_resize(colors_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-        depth_bg = my_utils.opencv_resize(depth_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-        mask_bg = my_utils.mask_resize(mask_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
     
     pts_carte = my_utils.depth2cam_carte(
         depth=depth,
@@ -185,20 +176,51 @@ def get_sphere(dream, save_dir_, config, height, width):
         height=height*config.pcd_upsampling_factor,
         width=width*config.pcd_upsampling_factor,
     )
+    # 3. Outliers removal
+    if config.phase1.outliers_removal.apply_on_fg:
+        pts_carte, colors = my_utils.GeometryTransforms.remove_statistical_outliers(
+            pts_carte,
+            colors,
+            **config.phase1.outliers_removal.options
+        )
+    
+    # 4. (Optional) Load LDI background points and merge with foreground points
+    if config.phase1.apply_ldi:
+        colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
+            dream=dream,
+            save_dir_=save_dir_,
+            phase=_phase_1b
+        )
 
-    pts_carte_bg = my_utils.depth2cam_carte(
-        depth=depth_bg,
-        sphere_radius=config.sphere_radius,
-        height=height*config.pcd_upsampling_factor,
-        width=width*config.pcd_upsampling_factor,
-    )
-    pts_carte_bg = pts_carte_bg[mask_bg]
-    colors_bg = colors_bg[mask_bg]
-    pts_carte = np.concatenate((pts_carte.reshape(-1, 3), pts_carte_bg.reshape(-1, 3)), axis=0)
-    colors =  np.concatenate((colors.reshape(-1, 3), colors_bg.reshape(-1, 3)), axis=0)
+        # resizing (upsampling or downsampling) is mandatory for LDI to make it match non-ldi images
+        colors_bg = my_utils.opencv_resize(colors_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+        depth_bg = my_utils.opencv_resize(depth_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
+        mask_bg = my_utils.mask_resize(mask_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
+                
+        pts_carte_bg = my_utils.depth2cam_carte(
+            depth=depth_bg,
+            sphere_radius=config.sphere_radius,
+            height=height*config.pcd_upsampling_factor,
+            width=width*config.pcd_upsampling_factor,
+        )
+        valid_bg = ~np.isnan(pts_carte_bg).any(axis=-1)
+        mask_bg = mask_bg & valid_bg
+        pts_carte_bg = pts_carte_bg[mask_bg]
+        colors_bg = colors_bg[mask_bg]
+
+        # (optional) outliers removal on background points
+        if config.phase1.outliers_removal.apply_on_ldi:
+            pts_carte_bg, colors_bg = my_utils.GeometryTransforms.remove_statistical_outliers(
+                pts_carte_bg,
+                colors_bg,
+                **config.phase1.outliers_removal.options
+            )
+
+        pts_carte = np.concatenate((pts_carte.reshape(-1, 3), pts_carte_bg.reshape(-1, 3)), axis=0)
+        colors =  np.concatenate((colors.reshape(-1, 3), colors_bg.reshape(-1, 3)), axis=0)
 
 
-    # correction pipeline
+    # 5. Correction pipeline
     pts_carte_corrected, colors_corrected = my_utils.run_corrective_pipeline_on_sphere(
         pts_carte, # in cartesian coordinates
         colors, 
@@ -214,6 +236,10 @@ def get_sphere(dream, save_dir_, config, height, width):
 
     return sphere
 
+# this scripts:
+# - creates high resolution sphere with optional LDI points and saves them in the cache for the final pcd
+# - aligns pairs of spheres with inpainting at intermediate views
+# - saves inpaintings and their estimated depth in the cache for phase 2.B and 2.C
     
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(

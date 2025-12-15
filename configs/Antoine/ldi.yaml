@@ -5,7 +5,7 @@ expname: ldi
 prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
 
 
-phase_ldi: # layered depth image
+ldi: # layered depth image
   depth_inpainting:
     additionnal_mask_dilation_px: 0
     fill_holes: True
