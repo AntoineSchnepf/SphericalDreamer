@@ -74,17 +74,16 @@ def correct_walls_lp(x, y, p=6.0):
 if __name__ == "__main__":
 
     # --- parse args: which sphere to load --- #
-    expname = "31_forest"
+    expname = "F2_forest"
     num_dreams = 5
     # ---------------------------------------- #
 
     save_dir = "OUTPUTS/SphericalDreamerRecurse"
     save_dir_ = f"{save_dir}/{expname}"
 
-    filename = f"{save_dir_}/pointclouds.pkl"
+    filename = f"{save_dir_}/02c_raw_dream_pcd.pkl"
     with open(filename, 'rb') as f:
-        point_clouds = pickle.load(f)
-    pcd = point_clouds[f'dream_{num_dreams-1:02d}']['total'].get_o3d_pointcloud()
+        pcd = pickle.load(f).get_o3d_pointcloud()
     old_lp_correct = False
 
     # --- script --- 
@@ -101,11 +100,12 @@ if __name__ == "__main__":
     ], dtype=np.float32)
 
     world_correction_kwargs = {
-        "correct_depth": True,
+        "correct_depth": False,
         "near": NEAR,
         "far": FAR,
         "correct_walls": False,
-        "correct_floor": True,
+        "correct_floor": False,
+        "remove_outliers": False,
         "depth_threshold_for_floor_correction": 1.0,
     }
 
@@ -117,8 +117,9 @@ if __name__ == "__main__":
 
 
     # matplotlib visualization of point cloud
-    pts=np.asarray(pcd.points)
-    colors=np.asarray(pcd.colors)
+    skip = 20
+    pts=np.asarray(pcd.points)[::skip, :]
+    colors=np.asarray(pcd.colors)[::skip, :]
 
     # remove points at both ends for now
     pts_corrected, colors = my_utils.run_corrective_pipeline_on_world(

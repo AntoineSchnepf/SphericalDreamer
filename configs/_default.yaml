@@ -30,6 +30,9 @@ geometry_correction:
     depth_threshold_for_floor_correction: 0.6
     remove_sky: False
     remove_outliers: True
+    outlier_removal_options:
+      nb_neighbors: 20
+      std_ratio: 2.0
     verbose: False
     plot: False
 
@@ -76,7 +79,7 @@ phase_ldi: # layered depth image
       sobel:
         ksize: 3
       depth_sharpening:
-        apply: True
+        apply: False
         filter_size: 5          
         depth_threshold: 0.01   
         sigma_s: 3.0            
