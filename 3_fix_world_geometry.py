@@ -21,7 +21,7 @@ _phase_current = _phase_3
 
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
-        debug=True, 
+        debug=False, 
         debug_parser_override=["--config", "Antoine/debug.yaml"]
     )
 
