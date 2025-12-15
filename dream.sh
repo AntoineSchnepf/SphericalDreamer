@@ -24,8 +24,9 @@ python3 2b_ldi.py --config $config_name
 echo Running 2c_align_pairs_harmonic_blending.py...
 python3 2c_align_pairs_harmonic_blending.py --config $config_name
 
-#3. Gaussian Splat #TODO
-
+#3. Fix world geometry
+echo Running 3_fix_world_geometry.py...
+python3 3_fix_world_geometry.py --config $config_name
 
 # 4. Render video
 echo Running 4_render_video.py...
