@@ -1,4 +1,5 @@
 import os
+os.environ.setdefault("OPEN3D_HEADLESS", "1") # for open3d headless rendering
 import numpy as np
 import open3d as o3d
 import pickle
@@ -9,7 +10,6 @@ import time
 from my_utils import PointCloud
 from my_utils import set_camera_from_elev_azim, printc
 from tqdm import tqdm
-os.environ.setdefault("OPEN3D_HEADLESS", "1") # for open3d headless rendering
 
 
 config = my_utils.fetch_config_via_parser(
@@ -28,20 +28,21 @@ config = my_utils.fetch_config_via_parser(
 
 repo_path = os.path.dirname(os.path.realpath(__file__))
 t0 = time.time()
-with open(f"{repo_path}/{config.save_dir}/{config.expname}/02b_raw_dream_pcd.pkl", "rb") as f:
+with open(f"{repo_path}/{config.save_dir}/{config.expname}/02c_raw_dream_pcd.pkl", "rb") as f:
     PointCloud_instance = pickle.load(f)
 
 printc(f"Loaded raw point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
 
+t0 = time.time()
 pts = PointCloud_instance.pts
 colors = PointCloud_instance.colors
-skip = 5
+skip = 10
 pts = pts[::skip]
 colors = colors[::skip]
 PointCloud_instance = PointCloud(pts=pts, colors=colors)
 pcd = PointCloud_instance.get_o3d_pointcloud()
 
-printc(f"Downsampled point cloud to {len(pcd.points)} points.", color='yellow')
+printc(f"Downsampled point cloud (skip = {skip}) to {len(pcd.points)} points in {time.time() - t0:.2f} seconds.", color='yellow')
 
 max_x = (config.num_dreams-1) * config.sphere_radius * config.delta_walk
 printc(f"max_X: {max_x}", color='red')
@@ -92,6 +93,10 @@ else:
     pcd_filtered = final_pcd
     ind = np.arange(len(final_pcd.points))
 
+if not np.isfinite(pcd_filtered.points).all():
+    printc("WARNING: Point cloud contains NaN or infinite values", color='red')
+
+
 # -------- Headless rendering (Offscreen) --------
 
 # Optionally visualize removed points
@@ -100,12 +105,26 @@ if config.phase4.visualize_removed_points:
     pcd_removed = o3d.geometry.PointCloud()
     pcd_removed.points = o3d.utility.Vector3dVector(np.asarray(final_pcd.points)[out_idx])
     pcd_removed.paint_uniform_color([0.6, 0.6, 0.6])
+    if not np.isfinite(pcd_removed.points).all():
+        printc("WARNING: Removed point cloud contains NaN or infinite values", color='red')
+
 
 # Create an offscreen renderer (no window)
 width, height = config.phase4.width, config.phase4.height
 renderer = o3d.visualization.rendering.OffscreenRenderer(width, height)
 scene = renderer.scene
 scene.set_background(config.phase4.bg_color) 
+
+
+# Disabling color processing
+view = scene.view  
+view.set_post_processing(False)
+# Linear tone mapping
+cg = o3d.visualization.rendering.ColorGrading(
+    o3d.visualization.rendering.ColorGrading.Quality.HIGH,
+    o3d.visualization.rendering.ColorGrading.ToneMapping.LINEAR,
+)
+view.set_color_grading(cg)
 
 # Basic unlit material for points
 mat = o3d.visualization.rendering.MaterialRecord()

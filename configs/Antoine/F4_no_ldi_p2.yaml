@@ -1,0 +1,25 @@
+# ---meta---
+expname: F4_no_ldi_p2
+
+# ----- args generation -----
+prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
+
+num_dreams: 5
+
+load_phase1_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase3_from: null
+
+geometry_correction:
+  sphere:
+    remove_outliers: False
+
+phase2: # pairs of sphere inpainting + deformation
+  apply_ldi: True
+
+
+phase4: # render video
+  world:
+    correct_depth: False
+    correct_walls: True

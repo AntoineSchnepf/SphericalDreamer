@@ -329,7 +329,6 @@ def harmonic_blend_of_depths_ldi(
 
     return res
 
-
 def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=False, output_prefix="", where_save=None):
     blended_depth = np.zeros_like(warped_depth_interp)
     blended_depth[missing_info_mask] = depth_estimated[missing_info_mask]

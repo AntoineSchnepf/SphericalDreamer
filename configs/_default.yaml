@@ -121,14 +121,14 @@ phase4: # render video
   fix_world: True
   point_size: 3.0
   bg_color: [0, 0, 0, 1]
-  width: 1280
-  height: 720
+  width: 512
+  height: 512
   remove_outliers:
     apply: True
     nb_neighbors: 20
     std_ratio: 5.0
   world:
-    correct_depth: True
+    correct_depth: False
     near: 0.1
     far: 1.0
     correct_walls: False
@@ -136,20 +136,20 @@ phase4: # render video
     depth_threshold_for_floor_correction: 1.0
     remove_outliers: False
   render_settings:
-    trajectory: walk_look # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
+    trajectory: walk_lookaround # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
     custom_trajectory: [] # List of [x, y, z, elev, azim], only used if trajectory is 'custom'
     ranges:
       min_x: 0.0
       min_y: -1.0
       max_y: 1.0
       min_z: -0.1
-      mid_z: 0.15
+      mid_z: -0.1
       max_z: 1.5
     framerate:
       fps: 60
-      fpm: 200
-      fpd_e: 3
-      fpd_a: 3
+      fpm: 60
+      fpd_e: 1
+      fpd_a: 1
 
 
 # tuned args

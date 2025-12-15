@@ -85,7 +85,6 @@ def printc(str, color=None):
         }
         print(f"{colors[color]}{str}{colors['end']}")
 
-
 def copy_phase_folders(folder_start_with: str, item_start_with: str,
                        source_dir: Path, dest_dir: Path):
 
@@ -1056,10 +1055,12 @@ class Sphere:
         self.opening_kwargs = opening_kwargs
         self.pose = pose
 
-        # open the Sphere in all four ways to get all states
-        t = time.time()
-        self.init_states(pts_carte, colors)
-        print(f"Sphere init took {time.time() - t:.1f}s")
+        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+
+        self.is_closed_init = False
+        self.is_both_opened_init = False
+        self.is_left_opened_init = False
+        self.is_right_opened_init = False
 
     @staticmethod
     def filter_nan(pts_carte, colors):
@@ -1068,24 +1069,50 @@ class Sphere:
         colors = colors[mask_finite]
         return pts_carte, colors
     
-    def init_states(self, pts_carte, colors):
-        # filter nan
-        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+    @property
+    def closed(self):
+        if not self.is_closed_init:
+            self._closed = self._close(self.pts_carte, self.colors)
+            self.is_closed_init = True
+        return self._closed
+
+    @property
+    def both_opened(self):
+        if not self.is_both_opened_init:
+            self._both_opened = self._open_both(self.pts_carte, self.colors)
+            self.is_both_opened_init = True
+        return self._both_opened
+    
+    @property
+    def left_opened(self):
+        if not self.is_left_opened_init:
+            self._left_opened = self._open_left(self.pts_carte, self.colors)
+            self.is_left_opened_init = True
+        return self._left_opened
+
+    @property
+    def right_opened(self):
+        if not self.is_right_opened_init:
+            self._right_opened = self._open_right(self.pts_carte, self.colors)
+            self.is_right_opened_init = True
+        return self._right_opened
+    
+    def init_all_states(self):
         # compute all openings
-        self.closed = self._close(self.pts_carte, self.colors)
-        self.both_opened = self._open_both(self.pts_carte, self.colors)
-        self.left_opened = self._open_left(self.pts_carte, self.colors)
-        self.right_opened = self._open_right(self.pts_carte, self.colors)
+        self._closed = self._close(self.pts_carte, self.colors)
+        self._both_opened = self._open_both(self.pts_carte, self.colors)
+        self._left_opened = self._open_left(self.pts_carte, self.colors)
+        self._right_opened = self._open_right(self.pts_carte, self.colors)
 
     def get_state(self, open_left, open_right):
         if open_left and open_right:
-            return self.both_opened_sphere
+            return self.both_opened
         elif open_left and not open_right:
-            return self.left_opened_sphere
+            return self.left_opened
         elif not open_left and open_right:
-            return self.right_opened_sphere
+            return self.right_opened
         else:
-            return self.closed_sphere
+            return self.closed
     
     def _close(self, pts_carte, colors):
         sphere_closed = SphereState(
@@ -1148,7 +1175,13 @@ class Sphere:
     def add_new_points(self, new_pts_carte, new_colors):
         pts_carte = np.concatenate((self.pts_carte, new_pts_carte.reshape(-1, 3)), axis=0)
         colors = np.concatenate((self.colors, new_colors.reshape(-1, 3)), axis=0)
-        self.init_states(pts_carte, colors)
+
+        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+
+        self.is_closed_init = False
+        self.is_both_opened_init = False
+        self.is_left_opened_init = False
+        self.is_right_opened_init = False
 
     def update_pose(self, new_pose):
         self.pose = new_pose
