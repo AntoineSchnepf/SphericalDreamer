@@ -22,6 +22,9 @@ import argparse
 import pyfiglet
 import shutil
 from pathlib import Path
+import imageio.v2 as imageio
+import open3d as o3d
+
 
 # -------------------------------------------- #
 # --------------- Config utils ---------------- #
@@ -85,7 +88,32 @@ def printc(str, color=None):
         }
         print(f"{colors[color]}{str}{colors['end']}")
 
-def copy_phase_folders(folder_start_with: str, item_start_with: str,
+def copy_phase_folders(source_dir, dest_dir, phase):
+
+    if source_dir == dest_dir:
+        return
+
+    if phase.startswith("1"):
+        folder_start_with = "dream_"
+    elif phase.startswith("2"):
+        folder_start_with = "align_"
+
+    # --- 1. Copy root-level files that match phase ---
+    for item in source_dir.iterdir():
+        if item.is_file() and item.name.startswith(phase):
+            shutil.copy2(item, dest_dir / item.name)
+
+    # --- 2. Copy folders that match folder_start_with ---
+    for folder in source_dir.iterdir():
+        if folder.is_dir() and folder.name.startswith(folder_start_with):
+
+            src_folder = source_dir / folder.name / phase
+            dst_folder = dest_dir / folder.name
+            dst_folder.mkdir(parents=True, exist_ok=True)
+
+            os.system(f"cp -r {src_folder} {dst_folder}")
+
+def copy_phase_folders_old(folder_start_with: str, item_start_with: str,
                        source_dir: Path, dest_dir: Path):
 
     if source_dir == dest_dir:
@@ -150,7 +178,7 @@ def setup(config):
         width = config.width
         height = config.height
         
-    save_dir_ = f"{config.save_dir}/{config.expname}"
+    save_dir_ = Path(config.save_dir) / config.expname 
     pose_init = np.array([
         [1, 0, 0, 0],
         [0, 1, 0, 0],
@@ -159,12 +187,24 @@ def setup(config):
     ], dtype=np.float32)
     translation_direction = np.array(config.translation_direction, dtype=np.float32)
     pose_end = camera_translation(pose_init, config.delta_walk * translation_direction * (config.num_dreams-1))
+
+    # create directories for saving:
+    _partition = 'dream'
+    for i in range(0, config.num_dreams):
+        save_dir__ = save_dir_ / f"{_partition}_{i:02d}"
+        os.makedirs(save_dir__, exist_ok=True)
+
+    _partition = 'align'
+    for i in range(1, config.num_dreams):
+        save_dir__ = save_dir_ / f"{_partition}_{i:02d}"
+        os.makedirs(save_dir__, exist_ok=True)
+
+
     return seeds, width, height, save_dir_, pose_init, pose_end, translation_direction
 
 # -------------------------------------------- #
 # ------ Classic Computer Vision utils ------- #
 # -------------------------------------------- #
-
 
 def fill_mask(mask, flip=False):
     # mask: boolean NumPy array
@@ -248,6 +288,7 @@ def mask_resize(mask, new_h, new_w):
 def resize_depth():
    #TODO
    pass
+
 # ---------------------------- #
 # ------ Visualization ------- #
 # ---------------------------- #
@@ -508,8 +549,8 @@ def tile_image(images, insert_red_lines=True):
 # │
 # ────────────────► φ (azimuth) in [-π, π[
 
-# perspective projection functions
 
+# perspective projection functions
 def carte2persp_3D(carte_points: np.ndarray,
                     fx: float,
                     fy: float,
@@ -750,7 +791,6 @@ def cyl2cart_zaxis(cyl):
 
     return np.stack((X, Y, Z), axis=-1)
 
-
 # spherical / erp coordinates functions
 def erp2sph_2D(erp_points:np.array, erp_image_height:int, erp_image_width:int):
     """
@@ -849,7 +889,6 @@ def carte2sph_3D(carte_points):
     sph_points = np.stack((theta, phi, r), axis=-1)
     return sph_points
 
-
 # cam2world, world2cam and cam2cam functions
 def cam_sph2world_3D(points_3D_cam_sph, pose):
     """
@@ -909,7 +948,6 @@ def world2cam_carte_3D(points_3D_world_carte, pose):
     points_3D_cam_carte = np.einsum('ij,...j->...i', np.linalg.inv(pose), cat_ones(points_3D_world_carte))[..., :3]
     return points_3D_cam_carte
 
-
 # depth2 functions (assumes has shape [H,W])
 def get_canonical_sph_pixels(height, width):
     points_2D_erp = np.stack((np.meshgrid(range(width), range(height))), axis=-1) 
@@ -936,54 +974,70 @@ def depth2world(depth, pose, sphere_radius, height, width):
 # ---------------------------------------- #
 # ----- Panorama / Pointcloud utils  ----- #
 # ---------------------------------------- #
-def load_rgbd_pano(dream, save_dir_, override_depth_with_ones=False):
-    load_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
-    pano_rgb = Image.open(os.path.join(load_dir__, "XX_pano_rgb.png"))
+
+def load_rgbd_pano(dream, save_dir_, phase, override_depth_with_ones=False):
+    load_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
+
+    pano_rgb = Image.open(load_dir__ / ".cache" / f"pano_rgb.png")
     colors = PIL_to_numpy(pano_rgb)
-    depth = np.load(os.path.join(load_dir__, "XX_depth.npy"))
+
+    depth = np.load(load_dir__ / ".cache" / f"depth.npy")
+    
     if override_depth_with_ones:
         depth = np.ones_like(depth)  
         print("WARNING: depth override to ones for debugging purposes")
+
     return colors, depth
 
-def save_rgbd_pano(pano_rgb, depth, dream, save_dir_):
-    save_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
+def save_rgbd_pano(pano_rgb, depth, dream, save_dir_, phase):
+    save_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
     os.makedirs(save_dir__, exist_ok=True)
-    pano_rgb.save(os.path.join(save_dir__, "XX_pano_rgb.png"))
-    np.save(os.path.join(save_dir__, "XX_depth.npy"), depth)
-    depth_numpy_to_PIL(depth).save(os.path.join(save_dir__, "XX_depth.png"))
-    depth_numpy_to_figure(depth).savefig(os.path.join(save_dir__, "XX_depth_figure.png"))
+    os.makedirs(save_dir__ / ".cache", exist_ok=True)
+
+    # save visualization
+    pano_rgb.save(save_dir__ / f"pano_rgb.png")
+    depth_numpy_to_figure(depth).savefig(save_dir__ / f"depth_figure.png")
+
+    # save cache
+    pano_rgb.save(save_dir__ / ".cache" / f"pano_rgb.png")
+    np.save(save_dir__ / ".cache" / f"depth.npy", depth)
 
 def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, dream, save_dir_, phase):
-    if phase == 1:
-        save_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
-    elif phase == 2:
-        save_dir__ = os.path.join(save_dir_, f"align_{dream:02d}")
+    if phase.startswith("1"):
+        save_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
+    elif phase.startswith("2"):
+        save_dir__ = save_dir_ / f"align_{dream:02d}" / phase
     else:
-        raise ValueError("phase must be 1 or 2, received:", phase)
+        raise ValueError("phase must start with 1 or 2, received:", phase)
     
     os.makedirs(save_dir__, exist_ok=True)
-    pano_rgb_bg.save(os.path.join(save_dir__, "ZZ_ldi_pano_rgb.png"))
-    np.save(os.path.join(save_dir__, "ZZ_ldi_depth.npy"), depth_bg)
-    depth_numpy_to_PIL(depth_bg).save(os.path.join(save_dir__, "ZZ_ldi_depth.png"))
-    depth_numpy_to_figure(depth_bg).savefig(os.path.join(save_dir__, "ZZ_ldi_depth_figure.png"))
-    numpy_bool_to_pil_mask(mask_bg).save(os.path.join(save_dir__, "ZZ_ldi_mask.png"))
+    os.makedirs(save_dir__ / ".cache", exist_ok=True)
+
+    # save visualization
+    pano_rgb_bg.save(save_dir__ / f"ldi_pano_rgb.png")
+    depth_numpy_to_figure(depth_bg).savefig(save_dir__ / f"ldi_depth_figure.png")
+    numpy_bool_to_pil_mask(mask_bg).save(save_dir__ / f"ldi_mask.png")
+
+    # save cache
+    pano_rgb_bg.save(save_dir__ / ".cache" / f"ldi_pano_rgb.png")
+    np.save(save_dir__ / ".cache" / f"ldi_depth.npy", depth_bg)
+    np.save(save_dir__ / ".cache" / f"ldi_mask.npy", mask_bg)
 
 def load_rgbd_ldi_pano(dream, save_dir_, phase):
-    if phase == 1:
-        load_dir__ = os.path.join(save_dir_, f"dream_{dream:02d}")
-    elif phase == 2:
-        load_dir__ = os.path.join(save_dir_, f"align_{dream:02d}")
+    if phase.startswith("1"):
+        load_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
+    elif phase.startswith("2"):
+        load_dir__ = save_dir_ / f"align_{dream:02d}" / phase
     else:
-        raise ValueError("phase must be 1 or 2, received:", phase)
+        raise ValueError("phase must start with 1 or 2, received:", phase)
     
-    pano_rgb_bg = Image.open(os.path.join(load_dir__, "ZZ_ldi_pano_rgb.png"))
+    pano_rgb_bg = Image.open(load_dir__ / ".cache" / f"ldi_pano_rgb.png")
     colors_bg = PIL_to_numpy(pano_rgb_bg)
-    depth_bg = np.load(os.path.join(load_dir__, "ZZ_ldi_depth.npy"))
-    mask_bg = pil_mask_to_numpy_bool(Image.open(os.path.join(load_dir__, "ZZ_ldi_mask.png")))
+
+    depth_bg = np.load(load_dir__ / ".cache" / f"ldi_depth.npy")
+    mask_bg = np.load(load_dir__ / ".cache" / f"ldi_mask.npy")
 
     return colors_bg, depth_bg, mask_bg
-
 
 class PointCloud:
     def __init__(self, pts, colors):
@@ -1243,10 +1297,10 @@ def camera_translation(pose, translation):
     pose2[:3, 3] += translation
     return pose2
 
-
 # ---------------------------------------- #
 # ------- Geometry Correction utils  ----- #
 # ---------------------------------------- #
+
 class Regression1D:
 
     @staticmethod
@@ -2352,7 +2406,6 @@ class GeometryTransforms:
 
         return pts_cam_cartesian, colors
 
-
 def run_corrective_pipeline_on_sphere(
         pts, # in cartesian coordinates (local camera frame)
         colors, 
@@ -2612,7 +2665,6 @@ def run_corrective_pipeline_on_world(
 
     return final_pts, colors
     
-
 # ----------------------------- #
 # ----- Utility functions ----- #
 # ----------------------------- #
@@ -4165,9 +4217,6 @@ def unique_gradient_image(width=1024, height=1024) -> Image.Image:
 # ------------------------------------------------ #
 # ------------------ Video Utils ----------------- #
 # ------------------------------------------------ #
-import numpy as np
-import imageio.v2 as imageio
-import open3d as o3d
 
 def save_video_from_o3d_images(
     images,
@@ -4254,6 +4303,12 @@ def set_camera_from_elev_azim(scene_camera,
 
     # Default world up
     world_up = np.array([0.0, 0.0, 1.0], dtype=float)
+
+    # si la bsae de la camera est direct et que forward est +Z'
+    # forward = +Z'
+    # right = +X'
+    # up = +Y' 
+
 
     # Avoid collinearity between forward and up
     if np.abs(np.dot(forward, world_up)) > 0.99:

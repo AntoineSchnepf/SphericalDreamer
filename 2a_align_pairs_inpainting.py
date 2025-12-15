@@ -38,8 +38,13 @@ with contextlib.redirect_stdout(StringIO()):
     from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2, render_v1, render_v0
 
-output_prefix = "02a_"
+_phase_1a = "1a"
+_phase_1b = "1b"
+_phase_2a = "2a"
+_phase_2b = "2b"
+_phase_2c = "2c"
 
+_phase_current = _phase_2a
 
 def get_missing_info_mask(operations, visited_pixels):
     missing_info_masks = [~visited_pixels]
@@ -60,6 +65,7 @@ def render_and_inpaint_from_pose(
         prompt,
         masking_operations,
         rendering_version,
+        blending_mode,
         where_save
     ):
 
@@ -113,25 +119,25 @@ def render_and_inpaint_from_pose(
             pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
             pano_inpainted_raw=pano_inpainted_raw,
             missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
-            blending_mode='compose', #TODO: add to cfg
-        ) #TODO: Check the blending strategy again. Maybe seamless is better ? 
-        pano_inpainted_raw.save(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
-        pano_rgb_inpainted.save(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted.png"))
-    else:
-        pano_inpainted_raw = Image.open(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted_raw.png"))
-        pano_rgb_inpainted = Image.open(os.path.join(where_save, output_prefix+"XX_pano_rgb_inpainted.png"))
+            blending_mode=blending_mode, 
+        ) 
 
+        # save cache
+        pano_inpainted_raw.save(where_save / _phase_current / ".cache" / "pano_rgb_inpainted_raw.png")
+        pano_rgb_inpainted.save(where_save / _phase_current / ".cache" / "pano_rgb_inpainted.png")
+    else:
+        pano_inpainted_raw = Image.open(where_save / _phase_current / ".cache" / "pano_rgb_inpainted_raw.png")
+        pano_rgb_inpainted = Image.open(where_save / _phase_current / ".cache" / "pano_rgb_inpainted.png")
 
 
     # 7. Estimate depth
-    # TODO: (Antoine, 16 OCT) LayerPANO3D Has a depth inpainting model, which may be better than this + harmonic blending. Worth testing.
     if not skip_inpainting:
         depth_estimated = spherical_dreamer.estimate_pano_depth(
             pano_rgb=np.array(pano_rgb_inpainted)
         )
-        np.save(os.path.join(where_save, output_prefix+"XX_estimated_depth.npy"), depth_estimated)
+        np.save(where_save / _phase_current / ".cache" / "estimated_depth.npy", depth_estimated)
     else:
-        depth_estimated = np.load(os.path.join(where_save, output_prefix+"XX_estimated_depth.npy"))
+        depth_estimated = np.load(where_save / _phase_current / ".cache" / "estimated_depth.npy")
     # depth_estimated=np.ones_like(depth_estimated) * sphere_radius  
     # print("WARNING: estimated depth override to ones for debugging purposes")
     
@@ -154,12 +160,14 @@ def get_sphere(dream, save_dir_, config, height, width):
 
     colors, depth = my_utils.load_rgbd_pano(
         dream=dream,
-        save_dir_=save_dir_
+        save_dir_=save_dir_,
+        phase=_phase_1a
     )
+
     colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
             dream=dream,
             save_dir_=save_dir_,
-            phase=1
+            phase=_phase_1b
     )
         
     # optionnal upsampling
@@ -224,9 +232,9 @@ if __name__ == "__main__":
     # ------------------------------------------------------------ #
     # ---- PHASE 2-A ALIGN PAIRS OF SPHERES WITH INPAINTING  ---- #
     # ------------------------------------------------------------ #
-    printc(f"=== [PHASE 2-A]  EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== [PHASE {_phase_current}]  EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.load_phase2a_from:
-        printc(f"=== PHASE 2-A : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
+        printc(f"=== PHASE {_phase_current} : ALIGN PAIRS OF SPHERES WITH INPAINTING ===", color='green')
         
         # INIT: load data for sphere1
         sphere1 = get_sphere(
@@ -241,9 +249,10 @@ if __name__ == "__main__":
 
         # LOOP
         for i in range(1, config.num_dreams):
-            printc(f"--- 2-A: Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
-            save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
-            os.makedirs(save_dir__, exist_ok=True)
+            printc(f"--- {_phase_current}: Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
+            save_dir__ = save_dir_ / f"align_{i:02d}"
+            os.makedirs(save_dir__ / _phase_current / ".cache", exist_ok=True)
+
 
             # 1. Load data for sphere2
             sphere2 = get_sphere(
@@ -294,6 +303,7 @@ if __name__ == "__main__":
                 prompt=config.prompt,
                 masking_operations=masking_operations,
                 rendering_version=config.phase2.rendering_version,
+                blending_mode=config.phase2.inpainting_blend_mode,
                 where_save=save_dir__,
             )
 
@@ -310,10 +320,10 @@ if __name__ == "__main__":
             pano_rgb_inpainted        = res_render_inpaint['pano_rgb_inpainted']
             depth_estimated           = res_render_inpaint['depth_estimated']
 
-            # 5. Save YY data reserved for phase 2.B
-            sphere1.save_dict(os.path.join(save_dir__, output_prefix+"YY_sphere1.pkl"))
-            sphere2.save_dict(os.path.join(save_dir__, output_prefix+"YY_sphere2.pkl"))
-            np.save(f"{save_dir__}/{output_prefix}YY_other.npy", {
+            # 5. Save cache data for phase 2.B and 2.C
+            sphere1.save_dict(save_dir__ / _phase_current / ".cache"/ "sphere1.pkl")
+            sphere2.save_dict(save_dir__ / _phase_current / ".cache"/ "sphere2.pkl")
+            np.save(save_dir__ / _phase_current / ".cache"/ "other_data.npy", {
                 'pose_intermediate'    : pose_intermediate,
                 'warped_img_interp'    : warped_img_interp,
                 'warped_depth_interp'  : warped_depth_interp,
@@ -322,17 +332,18 @@ if __name__ == "__main__":
                 'depth_estimated'      : depth_estimated,
             })
 
-            # 6. Save debug images
-            my_utils.numpy_to_PIL(warped_img)           .save(os.path.join(save_dir__, output_prefix+"01_warped_img.png"))
-            my_utils.numpy_to_PIL(warped_img_interp)    .save(os.path.join(save_dir__, output_prefix+"01_warped_img_interp.png"))
+            # 6. Save viz images
+            my_utils.numpy_to_PIL(warped_img)                      .save(save_dir__ / _phase_current / "01_warped_img.png")
+            my_utils.numpy_to_PIL(warped_img_interp)               .save(save_dir__ / _phase_current / "01_warped_img_interp.png")
 
-            my_utils.depth_numpy_to_figure(warped_depth)        .savefig(os.path.join(save_dir__, output_prefix+"02_warped_depth.png"))
-            my_utils.depth_numpy_to_figure(warped_depth_interp) .savefig(os.path.join(save_dir__, output_prefix+"02_warped_depth_interp.png"))
-            missing_info_masks_tile                      .save(   os.path.join(save_dir__, output_prefix+"03_missing_info_masks_tile.png"))
-            overlay_before_inpainting                    .save(   os.path.join(save_dir__, output_prefix+"04_overlay_before_inpainting.png"))
-            pano_inpainted_raw                           .save(   os.path.join(save_dir__, output_prefix+"05_pano_rgb_inpainted_raw.png"))
-            pano_rgb_inpainted                           .save(   os.path.join(save_dir__, output_prefix+"06_pano_rgb_inpainted.png"))
-            my_utils.depth_numpy_to_figure(depth_estimated) .savefig(os.path.join(save_dir__, output_prefix+"07_estimated_depth.png"))
+            my_utils.depth_numpy_to_figure(warped_depth)        .savefig(save_dir__ / _phase_current / "02_warped_depth.png")
+            my_utils.depth_numpy_to_figure(warped_depth_interp) .savefig(save_dir__ / _phase_current / "02_warped_depth_interp.png")
+
+            missing_info_masks_tile                                .save(save_dir__ / _phase_current / "03_missing_info_masks_tile.png")
+            overlay_before_inpainting                              .save(save_dir__ / _phase_current / "04_overlay_before_inpainting.png")
+            pano_inpainted_raw                                     .save(save_dir__ / _phase_current / "05_pano_rgb_inpainted_raw.png")
+            pano_rgb_inpainted                                     .save(save_dir__ / _phase_current / "06_pano_rgb_inpainted.png")
+            my_utils.depth_numpy_to_figure(depth_estimated)     .savefig(save_dir__ / _phase_current / "07_estimated_depth.png")
 
 
             # 7. END: Adjust sphere1 to be sphere2 for next iteration
@@ -340,15 +351,16 @@ if __name__ == "__main__":
             pose1 = pose2
 
 
-        printc("=== PHASE 2-A SUCCESSFULLY COMPLETED! ===", color='green')
+        printc(f"=== PHASE {_phase_current} SUCCESSFULLY COMPLETED! ===", color='green')
     else:
-        printc("SKIPPING PHASE 2-A: ALIGN PAIRS + INPAINT", color='magenta')
+        printc(f"SKIPPING PHASE {_phase_current}: ALIGN PAIRS + INPAINT", color='magenta')
         printc(f"Loading instead from {config.load_phase2a_from}", color='magenta')
+        
         source_phase2a_path = Path(config.save_dir) / config.load_phase2a_from
         dest_phase2a_path = Path(save_dir_)
+
         my_utils.copy_phase_folders(
-            folder_start_with="align_",
-            item_start_with=output_prefix,
             source_dir=source_phase2a_path,
-            dest_dir=dest_phase2a_path
+            dest_dir=dest_phase2a_path,
+            phase=_phase_current,
         )

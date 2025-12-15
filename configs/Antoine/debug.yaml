@@ -1,11 +1,11 @@
 # ---meta---
-expname: F4_no_ldi_p2
+expname: debug
 
 # ----- args generation -----
 prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
 
-num_dreams: 5
-
+num_dreams: 2
+pcd_upsampling_factor: 2
 
 geometry_correction:
   sphere:

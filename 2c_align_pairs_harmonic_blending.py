@@ -43,10 +43,13 @@ with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
     from utils.depth_alignment import Pano_depth_estimation
 
-phase2a_output_prefix = "02a_"
-phase2b_output_prefix = "02b_"
-output_prefix = "02c_"
+_phase_1a = "1a"
+_phase_1b = "1b"
+_phase_2a = "2a"
+_phase_2b = "2b"
+_phase_2c = "2c"
 
+_phase_current = _phase_2c
 
 def align_new_points(
         warped_img_interp,
@@ -108,8 +111,8 @@ def align_new_points(
         sphere_radius=sphere_radius,
         height=height*upsampling_factor,
         width=width*upsampling_factor,
+        phase=_phase_current,
         logging=True,
-        output_prefix=output_prefix,
         where_save=where_save
     )
 
@@ -123,8 +126,8 @@ def align_new_points(
         sphere_radius=sphere_radius,
         height=height*upsampling_factor,
         width=width*upsampling_factor,
+        phase=_phase_current,
         logging=True,
-        output_prefix=output_prefix,
         where_save=where_save,
 
         #ldi args
@@ -220,38 +223,41 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------- #
     # ---- PHASE 2-C ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING  ----- #
     # -------------------------------------------------------------------- #
-    printc(f"=== [PHASE 2-C]  EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== [PHASE {_phase_current}]  EXPERIMENT: {config.expname} ===", color='cyan')
     if not config.load_phase2c_from:
-        printc(f"=== PHASE 2-C : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
+        printc(f"=== PHASE {_phase_current} : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
 
         pointclouds = {}
         all_pts_world = np.array([]).reshape(0, 3)
         all_colors_world = np.array([]).reshape(0, 3)
 
         for i in range(1, config.num_dreams):
-            print(f"--- 2-C: Inpainting+Alignment {i:02d} / {config.num_dreams-1} ---")
-            save_dir__ = os.path.join(save_dir_, f"align_{i:02d}")
+            print(f"--- {_phase_current}: Inpainting+Alignment {i:02d} / {config.num_dreams-1} ---")
 
-            sphere1=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, phase2a_output_prefix+"YY_sphere1.pkl"))
-            sphere2=my_utils.Sphere.instanciate_from_saved_dict(os.path.join(save_dir__, phase2a_output_prefix+"YY_sphere2.pkl"))
+            save_dir__ = save_dir_ / f"align_{i:02d}"
+            os.makedirs(save_dir__ / _phase_current / ".cache", exist_ok=True)
+
+            sphere1=my_utils.Sphere.instanciate_from_saved_dict(save_dir__ / _phase_2a / ".cache" / "sphere1.pkl")
+            sphere2=my_utils.Sphere.instanciate_from_saved_dict(save_dir__ / _phase_2a / ".cache" / "sphere2.pkl")
+
             pose1=sphere1.pose
             pose2=sphere2.pose
 
-            data_YY = np.load(f"{save_dir__}/{phase2a_output_prefix}YY_other.npy", allow_pickle=True).item()
+            data =  np.load(save_dir__ / _phase_2a / ".cache" / "other_data.npy", allow_pickle=True).item()
 
-            depth_estimated       = data_YY['depth_estimated']
-            pose_intermediate     = data_YY['pose_intermediate']
-            warped_img_interp     = data_YY['warped_img_interp']
-            warped_depth_interp   = data_YY['warped_depth_interp']
-            pano_rgb_inpainted    = data_YY['pano_rgb_inpainted']
-            missing_info_mask     = data_YY['missing_info_mask']
+            depth_estimated       = data['depth_estimated']
+            pose_intermediate     = data['pose_intermediate']
+            warped_img_interp     = data['warped_img_interp']
+            warped_depth_interp   = data['warped_depth_interp']
+            pano_rgb_inpainted    = data['pano_rgb_inpainted']
+            missing_info_mask     = data['missing_info_mask']
 
             if config.phase2.apply_ldi:
 
                 colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
                     dream=i,
                     save_dir_=save_dir_,
-                    phase=2
+                    phase=_phase_2b,
                 )
                 ldi_colors =   colors_bg
                 ldi_depth  =   depth_bg
@@ -328,13 +334,16 @@ if __name__ == "__main__":
                 if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
                 all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
+
             else: # later iterations: sphere1 has both opened
                 if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
                 all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
+
             #10.b Neutral points
             all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
             all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
+
             #10.c Points from sphere2 (only last iter)
             if i == config.num_dreams - 1: 
                 if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
@@ -344,26 +353,27 @@ if __name__ == "__main__":
 
 
             # save pcd
-            with open(os.path.join(save_dir_, output_prefix+"pointclouds_zoo.pkl"), 'wb') as f:
+            with open(save_dir_  / f"{_phase_current}_pointclouds_zoo.pkl", 'wb') as f:
                 pkl.dump(pointclouds, f)
 
         # END OF PHASE 2: final pcd save
-        with open(os.path.join(save_dir_, output_prefix+"raw_dream_pcd.pkl"), 'wb') as f:
+        with open(save_dir_  / f"{_phase_current}_raw_dream_pcd.pkl", 'wb') as f:
             pkl.dump(
                 my_utils.PointCloud(
                     pts=all_pts_world,
                     colors=all_colors_world
                 ), f)
 
-        print("PHASE 2-C SUCCESSFULLY COMPLETED!")
+        print(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!")
     else:
-        printc("SKIPPING PHASE 2-C: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
+        printc(f"SKIPPING PHASE {_phase_current}: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
         printc(f"Loading instead from {config.load_phase2c_from}", color='magenta')
+
         source_phase2c_path = Path(config.save_dir) / config.load_phase2c_from
         dest_phase2c_path = Path(save_dir_)
+
         my_utils.copy_phase_folders(
-            folder_start_with="align_",
-            item_start_with=output_prefix,
             source_dir=source_phase2c_path,
-            dest_dir=dest_phase2c_path
+            dest_dir=dest_phase2c_path,
+            phase=_phase_current,
         )

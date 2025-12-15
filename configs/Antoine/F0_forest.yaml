@@ -5,8 +5,3 @@ expname: F0_forest
 prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
 
 num_dreams: 2
-
-load_phase1_from: null
-load_phase2a_from: null
-load_phase2b_from: null
-load_phase3_from: null

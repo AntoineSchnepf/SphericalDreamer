@@ -96,7 +96,7 @@ def get_harmonic_blending_mask(missing_info_mask):
     assert check_partition(mask1, mask2, boundary), "Masks are not a valid partition of the image"
     return mask1, mask2, boundary
 
-def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=False, output_prefix="", where_save=None):
+def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, phase, logging=False, where_save=None):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
         - points in the good region of warped_depth_interp stay unchanged
@@ -119,7 +119,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(os.path.join(where_save, output_prefix+"07_harmonic_blending_masks.png"))
+        plt.savefig(where_save / phase / "07_harmonic_blending_masks.png")
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -178,7 +178,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_harmonic.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_harmonic.png")
         plt.show()
 
     return pts_deformed, colors_out, pcd_harmonic, blended_depth_harmonic
@@ -192,15 +192,15 @@ def harmonic_blend_of_depths_ldi(
         sphere_radius, 
         height, 
         width, 
+        phase,
         logging=False, 
-        output_prefix="", 
         where_save=None,
 
         # ldi args
         ldi_depth=None,
         ldi_colors=None, 
         ldi_mask=None,
-        ):
+    ):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
         - points in the good region of warped_depth_interp stay unchanged
@@ -223,7 +223,7 @@ def harmonic_blend_of_depths_ldi(
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(os.path.join(where_save, output_prefix+"07_harmonic_blending_masks.png"))
+        plt.savefig(where_save / phase / "07_harmonic_blending_masks.png")
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -309,7 +309,7 @@ def harmonic_blend_of_depths_ldi(
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_harmonic.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_harmonic.png")
         plt.show()
 
     res = {
@@ -329,7 +329,7 @@ def harmonic_blend_of_depths_ldi(
 
     return res
 
-def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=False, output_prefix="", where_save=None):
+def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, phase, logging=False, where_save=None):
     blended_depth = np.zeros_like(warped_depth_interp)
     blended_depth[missing_info_mask] = depth_estimated[missing_info_mask]
     blended_depth[~missing_info_mask] = warped_depth_interp[~missing_info_mask]
@@ -345,7 +345,7 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
         plt.imshow(blended_depth, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Naive')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_naive.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_naive.png")
         plt.show()
 
     return pcd_naive, blended_depth
