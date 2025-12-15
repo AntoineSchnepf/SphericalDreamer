@@ -2406,6 +2406,10 @@ class GeometryTransforms:
 
         return pts_cam_cartesian, colors
 
+_default_outlier_removal_options = {
+    'nb_neighbors': 20,
+    'std_ratio': 1.8,
+}
 def run_corrective_pipeline_on_sphere(
         pts, # in cartesian coordinates (local camera frame)
         colors, 
@@ -2416,8 +2420,9 @@ def run_corrective_pipeline_on_sphere(
         correct_walls, 
         correct_floor, 
         depth_threshold_for_floor_correction, 
-        remove_sky, 
-        remove_outliers, 
+        remove_sky=False, 
+        remove_outliers=True, 
+        outlier_removal_options=_default_outlier_removal_options,
         verbose=False,
         plot=False,
     ):
@@ -2502,8 +2507,8 @@ def run_corrective_pipeline_on_sphere(
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,
             colors=colors,
-            nb_neighbors=20,
-            std_ratio=1.8
+            nb_neighbors=outlier_removal_options['nb_neighbors'],
+            std_ratio=outlier_removal_options['std_ratio']
         )
         n_after = len(final_pts.reshape(-1,3))
         if verbose:
@@ -2524,6 +2529,7 @@ def run_corrective_pipeline_on_world(
     correct_floor, 
     depth_threshold_for_floor_correction, 
     remove_outliers,
+    outlier_removal_options=_default_outlier_removal_options,
     verbose=False,
     plot=False,
 ):
@@ -2656,8 +2662,8 @@ def run_corrective_pipeline_on_world(
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,
             colors=colors,
-            nb_neighbors=20,
-            std_ratio=1.8
+            nb_neighbors=outlier_removal_options['nb_neighbors'],
+            std_ratio=outlier_removal_options['std_ratio']
         )
         n_after = len(final_pts.reshape(-1,3))
         if verbose:

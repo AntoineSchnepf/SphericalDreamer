@@ -313,6 +313,7 @@ def visualize_low_freq_removal(depth_origin, low_freq, depth, title_prefix="", s
 
     plt.show()
 
+
 # bilateral filtering (copyright: 3DP)
 def sparse_bilateral_filtering(
     depth, image, config, HR=False, mask=None, gsHR=True, edge_id=None, num_iter=None, num_gs_iter=None, spdb=False
@@ -355,7 +356,7 @@ def sparse_bilateral_filtering(
             vis_depth, config, discontinuity_map=discontinuity_map, HR=HR, mask=mask, window_size=window_size
         )
 
-    return save_images, save_depths
+    return vis_depth
 
 def vis_depth_discontinuity(depth, config, vis_diff=False, label=False, mask=None, save_path=None):
     """
@@ -565,7 +566,7 @@ def sharpen_depth_sparse_bilateral(depth, image, config, mask=None, num_iter=Non
             num_iter = 1
 
     # Call your original function
-    save_images, save_depths = sparse_bilateral_filtering(
+    depth_filtered = sparse_bilateral_filtering(
         depth=depth,
         image=image,
         config=config,
@@ -578,8 +579,7 @@ def sharpen_depth_sparse_bilateral(depth, image, config, mask=None, num_iter=Non
         spdb=False,
     )
 
-    depth_filtered = save_depths[-1]
-    return depth_filtered, save_depths
+    return depth_filtered
 
 def sobel_edges_from_depth(depth, mask=None, ksize=3):
     """
@@ -649,7 +649,7 @@ def get_canny_sobel_edges(depth, image, edged_sobel_ksize=3, canny_low_t=15, can
 
     # 1) Sparse bilateral filtering (sharpen depth)
     if depth_sharpen_config.apply:
-        depth_sharpened, all_depths = sharpen_depth_sparse_bilateral(
+        depth_sharpened = sharpen_depth_sparse_bilateral(
             depth=depth,
             image=image,
             config=depth_sharpen_config,
