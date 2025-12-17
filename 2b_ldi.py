@@ -42,7 +42,7 @@ def get_save_viz_path(dream):
 
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
-        debug=True, 
+        debug=False, 
         debug_parser_override=["--config", "Antoine/debug.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
@@ -79,8 +79,8 @@ if __name__ == "__main__":
                 depth_estimated       = data['depth_estimated']
                 pano_rgb_inpainted    = data['pano_rgb_inpainted']
 
-                list_img.append(my_utils.PIL_to_numpy(pano_rgb_inpainted))
-                list_depth_origin.append(depth_estimated)
+                list_img.append(my_utils.opencv_resize(my_utils.PIL_to_numpy(pano_rgb_inpainted), config.height, config.width, mode="bilinear"))
+                list_depth_origin.append(my_utils.opencv_resize(depth_estimated, config.height, config.width, mode="bilinear"))
 
             # ---------------------------------------
             # I. COMPUTE MASK FOR FOREGROUND OBJECTS

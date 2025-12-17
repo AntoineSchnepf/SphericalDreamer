@@ -42,7 +42,7 @@ def get_save_viz_path(dream):
 
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
-        debug=True, 
+        debug=False, 
         debug_parser_override=["--config", "Antoine/debug.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)

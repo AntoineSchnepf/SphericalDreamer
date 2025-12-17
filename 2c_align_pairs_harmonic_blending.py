@@ -70,35 +70,34 @@ def align_new_points(
     # 9. Blend depth
     new_colors = (np.array(pano_rgb_inpainted)/255.0)
 
-    # Optional upsampling to improve pcd density
-    if upsampling_factor > 1:
-        new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-        warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-        depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-        missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
+    # Upsampling (or resizing) to improve pcd density
+    new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
 
-        # sanity check
-        where_depth_nan_resized = np.isnan(warped_depth_interp)
-        if np.any(where_depth_nan_resized & (~missing_info_mask)):
-            print("WARNING: resized depth has NaNs in inpainted info regions!")
-            print(f"Percent of NaNs: {np.mean(where_depth_nan_resized & (~missing_info_mask))*100:.2f}%")
-            print("Expanding missing info mask to include these regions.")
-            # we want all nans in missing info mask
-            missing_info_mask = missing_info_mask | where_depth_nan_resized
-            
-        if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
-            assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
-            ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear") 
-            ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-            ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
+    # sanity check
+    where_depth_nan_resized = np.isnan(warped_depth_interp)
+    if np.any(where_depth_nan_resized & (~missing_info_mask)):
+        print("WARNING: resized depth has NaNs in inpainted info regions!")
+        print(f"Percent of NaNs: {np.mean(where_depth_nan_resized & (~missing_info_mask))*100:.2f}%")
+        print("Expanding missing info mask to include these regions.")
+        # we want all nans in missing info mask
+        missing_info_mask = missing_info_mask | where_depth_nan_resized
+        
+    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
+        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
+        ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear") 
+        ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
 
-            where_ldi_depth_nan_resized = np.isnan(ldi_depth)
-            if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
-                print("WARNING: resized ldi depth has NaNs in ldi regions!")
-                print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan_resized & (ldi_mask))*100:.2f}%")
-                print("Expanding ldi mask to include these regions.")
-                # we want zeros nans in ldi mask
-                ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
+        where_ldi_depth_nan_resized = np.isnan(ldi_depth)
+        if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
+            print("WARNING: resized ldi depth has NaNs in ldi regions!")
+            print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan_resized & (ldi_mask))*100:.2f}%")
+            print("Expanding ldi mask to include these regions.")
+            # we want zeros nans in ldi mask
+            ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
 
     # (Naive blending)
     # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
@@ -339,20 +338,26 @@ if __name__ == "__main__":
 
                     
 
-                (new_pts_1_ldi, new_colors_1_ldi), (new_pts_2_ldi, new_colors_2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
+                (new_pts1_ldi, new_colors1_ldi), (new_pts2_ldi, new_colors2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
                     new_pts_ldi, new_colors_ldi, pose1, pose2, translation_direction
                 )
+                
+                new_mask1_zeros = np.zeros(new_pts1.shape[:-1])
+                new_mask2_zeros = np.zeros(new_pts2.shape[:-1])
+                new_mask1_ones = np.ones(new_pts1_ldi.shape[:-1])
+                new_mask2_ones = np.ones(new_pts2_ldi.shape[:-1])
 
-                new_pts1           = np.concatenate((new_pts1,           new_pts_1_ldi), axis=0)
-                new_colors1        = np.concatenate((new_colors1,        new_colors_1_ldi), axis=0)
-                new_pts2           = np.concatenate((new_pts2,           new_pts_2_ldi), axis=0)
-                new_colors2        = np.concatenate((new_colors2,        new_colors_2_ldi), axis=0)
+                new_pts1           = np.concatenate((new_pts1,           new_pts1_ldi), axis=0)
+                new_colors1        = np.concatenate((new_colors1,        new_colors1_ldi), axis=0)
+                new_mask_ldi1      = np.concatenate((new_mask1_zeros,    new_mask1_ones), axis=0) 
+                new_pts2           = np.concatenate((new_pts2,           new_pts2_ldi), axis=0)
+                new_colors2        = np.concatenate((new_colors2,        new_colors2_ldi), axis=0)
+                new_mask_ldi2      = np.concatenate((new_mask2_zeros,    new_mask2_ones), axis=0)
                 new_pts_neutral    = np.concatenate((new_pts_neutral,    new_pts_neutral_ldi), axis=0)
                 new_colors_neutral = np.concatenate((new_colors_neutral, new_colors_neutral_ldi), axis=0)
 
-
-            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
-            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
+            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1)
+            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2)
 
             # Add all new points to world points, including inpainted+deformed points and points from the current dream.
             
@@ -394,7 +399,7 @@ if __name__ == "__main__":
                     colors=all_colors_world
                 ), f)
 
-        print(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!")
+        printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')
     else:
         printc(f"SKIPPING PHASE {_phase_current}: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
         printc(f"Loading instead from {config.load_phase2c_from}", color='magenta')

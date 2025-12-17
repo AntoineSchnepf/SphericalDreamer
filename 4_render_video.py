@@ -29,16 +29,15 @@ if __name__ == "__main__":
 
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
-    # -------- Import pointcloud --------
-    # repo_path = os.path.dirname(os.path.realpath(__file__))
-    # t0 = time.time()
-    # with open(f"{repo_path}/{config.save_dir}/{config.expname}/02b_raw_dream_pcd.pkl", "rb") as f:
-    #     pcd = pickle.load(f).get_o3d_pointcloud()
-    # printc(f"Loaded raw point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
-    # max_x = (config.num_dreams-1) * config.sphere_radius * config.delta_walk
-    # printc(f"max_X: {max_x}", color='red')
-
     repo_path = os.path.dirname(os.path.realpath(__file__))
+
+    # -------------------------------- #
+    # ---- PHASE 4 RENDER VIDEO  ----- #
+    # -------------------------------- #
+    printc(f"=== [PHASE {_phase_current}]  EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== PHASE {_phase_current} : RENDER VIDEO ===", color='green')
+
+    # -------- Import pointcloud --------
     t0 = time.time()
     with open(save_dir_ /f"{_phase_3}_final_dream_pcd.pkl", "rb") as f:
         PointCloud_instance = pickle.load(f)
@@ -151,3 +150,6 @@ if __name__ == "__main__":
         os.path.join(output_dir, f"{config.phase4.render_settings.trajectory}.mp4"),
         fps=config.phase4.render_settings.framerate.fps
     )
+
+    printc(f"--- {_phase_current}: Saved rendered video to {output_dir}", color='yellow')
+    printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')

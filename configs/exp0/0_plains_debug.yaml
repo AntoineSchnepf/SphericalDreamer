@@ -1,0 +1,10 @@
+expname: Plains_debug
+prompt: A wide open environment of gently rolling grass-covered plains, scattered rocks or trees, and expansive skies that emphasize scale, openness, and natural rhythm.
+
+
+load_phase1a_from: Plains
+load_phase1b_from: Plains
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null #TODO: implemtement this

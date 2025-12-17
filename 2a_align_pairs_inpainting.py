@@ -106,19 +106,25 @@ def render_and_inpaint_from_pose(
     # 6. Inpainting
     overlay_before_inpainting = my_utils.numpy_to_PIL(my_utils.overlay_mask(warped_img_interp, inpainting_mask, alpha=0.5)) 
 
+    in_height, in_width = config.phase2.inpainting_resolution.height, config.phase2.inpainting_resolution.width
     if not skip_inpainting: 
         pano_inpainted_raw = spherical_dreamer.inpaint_pano(
             prompt=prompt, 
             pano_rgb=my_utils.numpy_to_PIL(warped_img_interp), 
             mask=my_utils.numpy_to_PIL(inpainting_mask),
-            width=config.phase2.inpainting_resolution.width,
-            height=config.phase2.inpainting_resolution.height,
-        ).resize((width, height), resample=Image.LANCZOS) # FLAG: resize here is not optimal. We loose some resolution here. 
+            width=in_width,
+            height=in_height,
+        )
         # blending
+        pano_rgb_hr = my_utils.opencv_resize(warped_img_interp, in_height, in_width, mode='bilinear')
+        missing_info_mask_hr = my_utils.mask_resize(missing_info_mask, in_height, in_width)
+        where_nan_mask = np.isnan(pano_rgb_hr).any(axis=-1)
+        missing_info_mask_hr = missing_info_mask_hr | where_nan_mask
+
         pano_rgb_inpainted = spherical_dreamer.blend(
-            pano_rgb=my_utils.numpy_to_PIL(warped_img_interp),
+            pano_rgb=my_utils.numpy_to_PIL(pano_rgb_hr),
             pano_inpainted_raw=pano_inpainted_raw,
-            missing_info_mask=my_utils.numpy_to_PIL(missing_info_mask),
+            missing_info_mask=my_utils.numpy_bool_to_pil_mask(missing_info_mask_hr),
             blending_mode=blending_mode, 
         ) 
 
@@ -183,7 +189,12 @@ def get_sphere(dream, save_dir_, config, height, width):
             colors,
             **config.phase1.outliers_removal.options
         )
-    
+
+    _mask_fg = np.zeros(pts_carte.shape[:-1], dtype=bool)  # no LDI points here
+    to_cat = [pts_carte.reshape(-1, 3)]
+    to_cat_colors = [colors.reshape(-1, 3)]
+    to_cat_mask = [_mask_fg.reshape(-1)] 
+
     # 4. (Optional) Load LDI background points and merge with foreground points
     if config.phase1.apply_ldi:
         colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
@@ -216,25 +227,72 @@ def get_sphere(dream, save_dir_, config, height, width):
                 **config.phase1.outliers_removal.options
             )
 
-        pts_carte = np.concatenate((pts_carte.reshape(-1, 3), pts_carte_bg.reshape(-1, 3)), axis=0)
-        colors =  np.concatenate((colors.reshape(-1, 3), colors_bg.reshape(-1, 3)), axis=0)
+        _mask_ldi = np.ones(pts_carte_bg.shape[:-1], dtype=bool)
+        to_cat.append(pts_carte_bg.reshape(-1, 3))
+        to_cat_colors.append(colors_bg.reshape(-1, 3))
+        to_cat_mask.append(_mask_ldi.reshape(-1))
+
+    # concatenate fg and bg points
+    pts_carte, cat_meta = my_utils.concat_with_meta(*to_cat)    
+    colors, _ = my_utils.concat_with_meta(*to_cat_colors)
+    ldi_mask, _ = my_utils.concat_with_meta(*to_cat_mask)
 
 
     # 5. Correction pipeline
-    pts_carte_corrected, colors_corrected = my_utils.run_corrective_pipeline_on_sphere(
+    pts_carte_corrected, colors_corrected, ldi_mask_corrected = my_utils.run_corrective_pipeline_on_sphere(
         pts_carte, # in cartesian coordinates
         colors, 
+        ldi_mask, 
         height*config.pcd_upsampling_factor,
         width*config.pcd_upsampling_factor, 
         **config.geometry_correction.sphere
     )
     sphere = my_utils.Sphere(
         None, pts_carte_corrected, colors_corrected, 
+        ldi_mask=ldi_mask_corrected,
         forward_carte=translation_direction,
         opening_kwargs=config.world_opening,
     )
 
     return sphere
+
+def get_mask_filter_points_with_pose(points_w, pose, direction, x_thresh):
+    """
+    Filters out world points that satisfy (in camera frame):
+        x_cam > x_thresh AND z_cam < 0
+
+    Args:
+        points_w: (N, 3) array of points in WORLD coordinates
+        pose: (4, 4) camera pose matrix where
+              pose[:3, :3] = R_wc (camera orientation in world)
+              pose[:3, 3]  = C_w  (camera position in world)
+        direction: 'left' or 'right'. Whether to remove points for x > x_thresh (right) or x < -x_thresh (left)
+        x_thresh: threshold t expressed in CAMERA coordinates
+
+    Returns:
+        Filtered points in WORLD coordinates
+    """
+    points_w = np.asarray(points_w, dtype=float)
+
+    R_wc = pose[:3, :3]
+    C_w  = pose[:3, 3]
+
+    # World → camera transformation
+    # p_c = R_wc^T (p_w - C_w)
+    points_c = (R_wc.T @ (points_w - C_w).T).T
+
+    x_cam = points_c[:, 0]
+    z_cam = points_c[:, 2]
+
+    # Remove points that satisfy the condition
+    if direction == 'left':
+        keep_mask = ~((x_cam < -x_thresh) & (z_cam < 0))
+    elif direction == 'right':
+        keep_mask = ~((x_cam > x_thresh) & (z_cam < 0))
+    else:
+        raise ValueError(f"Unknown direction: {direction}. Use 'left' or 'right'.")
+    
+    return keep_mask
 
 # this scripts:
 # - creates high resolution sphere with optional LDI points and saves them in the cache for the final pcd
@@ -305,12 +363,52 @@ if __name__ == "__main__":
 
 
             # 4. Generate missing points from pose, inpaint, estimate depth (inside function below)
+            # current_points=np.concatenate((
+            #     sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
+            # ), axis=0)
+            # current_colors=np.concatenate((
+            #     sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
+            # ), axis=0)
+            
+            # Filter out some LDI points to avoid inpainting artifacts.
+            # Specifically, we remove LDI points that are below the fg points, normally invisble, but now perceived when opening the sphere.
+            # They otherwise cause drastical changes in inpainitng
+            s1_pts = sphere1.right_opened.get_world_pcd().pts
+            s1_colors = sphere1.right_opened.get_world_pcd().colors
+            s1_ldi_mask = sphere1.right_opened.get_world_pcd().ldi_mask
+
+            s1_pts_ldi = s1_pts[s1_ldi_mask]
+            s1_pts_fg = s1_pts[~s1_ldi_mask]
+            s1_colors_ldi = s1_colors[s1_ldi_mask]
+            s1_colors_fg = s1_colors[~s1_ldi_mask]
+
+            # filter out    
+            x_thresh = 0.4 # TODO: add this to config
+            ldi_filtering_mask = get_mask_filter_points_with_pose(s1_pts_ldi, pose=pose1, direction='right', x_thresh=x_thresh)
+            s1_pts_ldi = s1_pts_ldi[ldi_filtering_mask]
+            s1_colors_ldi = s1_colors_ldi[ldi_filtering_mask]
+
+            # same for sphere2
+            s2_pts = sphere2.left_opened.get_world_pcd().pts
+            s2_colors = sphere2.left_opened.get_world_pcd().colors
+            s2_ldi_mask = sphere2.left_opened.get_world_pcd().ldi_mask
+
+            s2_pts_ldi = s2_pts[s2_ldi_mask]
+            s2_pts_fg = s2_pts[~s2_ldi_mask]
+            s2_colors_ldi = s2_colors[s2_ldi_mask]
+            s2_colors_fg = s2_colors[~s2_ldi_mask]
+
+            s2_ldi_filtering_mask = get_mask_filter_points_with_pose(s2_pts_ldi, pose=pose2, direction='left', x_thresh=x_thresh)
+            s2_pts_ldi = s2_pts_ldi[s2_ldi_filtering_mask]
+            s2_colors_ldi = s2_colors_ldi[s2_ldi_filtering_mask]
+
             current_points=np.concatenate((
-                sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
+                s1_pts_fg, s1_pts_ldi, s2_pts_fg, s2_pts_ldi
             ), axis=0)
             current_colors=np.concatenate((
-                sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
+                s1_colors_fg, s1_colors_ldi, s2_colors_fg, s2_colors_ldi
             ), axis=0)
+
             masking_operations = [
                 partial(minimum_filter, size=(3,3), axes=(0,1)),
                 partial(maximum_filter, size=(3,3), axes=(0,1)),

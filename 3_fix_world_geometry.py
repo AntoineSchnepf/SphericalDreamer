@@ -28,6 +28,12 @@ if __name__ == "__main__":
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
     repo_path = os.path.dirname(os.path.realpath(__file__))
 
+    # --------------------------------------- #
+    # ---- PHASE 3 FIX WORLD GEOMETRY   ----- #
+    # --------------------------------------- #
+
+    printc(f"=== [PHASE {_phase_current}]  EXPERIMENT: {config.expname} ===", color='cyan')
+    printc(f"=== PHASE {_phase_current} : FIX WORLD GEOMETRY ===", color='green')
     # 1. Load pcd from previous phase
     t0 = time.time()
     with open(save_dir_ /f"{_phase_2c}_raw_dream_pcd.pkl", "rb") as f:
@@ -38,7 +44,7 @@ if __name__ == "__main__":
 
     # 2. Downsample point cloud for faster processing
     n_pts_before = len(PointCloud_instance.pts)
-    if config.phase3.pointcloud_downsampling.apply:
+    if config.phase3.pointcloud_downsampling.mode != "deactivated":
         if config.phase3.pointcloud_downsampling.mode == "skip":
             t0 = time.time()
             pts, colors = PointCloud_instance.pts, PointCloud_instance.colors
@@ -54,6 +60,21 @@ if __name__ == "__main__":
             voxel_size = config.phase3.pointcloud_downsampling.voxel_options.voxel_size
             pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
             printc(f"--- {_phase_current}: Downsampled point cloud from {n_pts_before} to {len(pcd.points)} points in {time.time() - t0:.2f} seconds using voxel downsampling.", color='yellow')
+        elif config.phase3.pointcloud_downsampling.mode == "auto":
+            t0 = time.time()
+            pcd = PointCloud_instance.get_o3d_pointcloud()
+            n_target = float(config.phase3.pointcloud_downsampling.auto_options.num_max_points)
+            ratio = n_target / n_pts_before
+            if ratio >= 1.0:
+                printc(f"--- {_phase_current}: Auto downsampling skipped as point cloud has {n_pts_before} points which is less than target {n_target} points.", color='yellow')
+            else:
+                stride = int(np.ceil(1 / ratio))
+                pts, colors = PointCloud_instance.pts, PointCloud_instance.colors
+                pts = pts[::stride]
+                colors = colors[::stride]
+                PointCloud_instance = PointCloud(pts=pts, colors=colors)
+                pcd = PointCloud_instance.get_o3d_pointcloud()
+                printc(f"--- {_phase_current}: Downsampled point cloud from {n_pts_before} to {len(pcd.points)} points in {time.time() - t0:.2f} seconds using skipping (stride={stride}).", color='yellow')
         else: 
             raise ValueError(f"--- {_phase_current}: Unknown downsampling mode: {config.phase3.pointcloud_downsampling.mode}")
     else:
@@ -116,3 +137,4 @@ if __name__ == "__main__":
         pickle.dump(PointCloud_instance, f)
 
     printc(f"--- {_phase_current}: Saved final point cloud to {save_dir_/_phase_3}_final_dream_pcd.pkl", color='yellow')
+    printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')
