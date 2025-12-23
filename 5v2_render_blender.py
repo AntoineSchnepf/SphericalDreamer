@@ -46,7 +46,8 @@ from blender_utils import (
 # -------------------------
 # User params
 # -------------------------
-PLY_PATH = "/home/k.kassab/panorama/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nfs_dataset/pointcloud/05_pcd_filtered_d.ply"
+# PLY_PATH = "/home/k.kassab/panorama/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nfs_dataset/pointcloud/05_pcd_filtered_d.ply"
+PLY_PATH = "/home/k.kassab/panorama/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/Caverns/3_final_dream_pcd_unfiltered.ply"
 
 # Point size and density settings
 # Rule: POINT_RADIUS should be >= VOXEL_SIZE to avoid gaps

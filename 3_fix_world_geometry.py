@@ -89,8 +89,8 @@ if __name__ == "__main__":
     my_pcd = PointCloud_instance.get_o3d_pointcloud()
     printc(f"--- {_phase_current}: Converted to o3d point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
     t0 = time.time()
-    o3d.io.write_point_cloud(f"{_phase_3}_final_dream_pcd_unfiltered.ply", my_pcd)
-    printc(f"--- {_phase_current}: Saved unfiltered point cloud to {_phase_3}_final_dream_pcd_unfiltered.ply in {time.time() - t0:.2f} seconds.", color='yellow')
+    o3d.io.write_point_cloud(save_dir_ /f"{_phase_3}_final_dream_pcd_unfiltered.ply", my_pcd)
+    printc(f"--- {_phase_current}: Saved unfiltered point cloud to {save_dir_ /f'{_phase_3}_final_dream_pcd_unfiltered.ply'} in {time.time() - t0:.2f} seconds.", color='yellow')
 
 
     # 2. Downsample point cloud for faster processing
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         pickle.dump(PointCloud_instance, f)
 
     # Save pcd as .ply
-    # o3d.io.write_point_cloud(f"{_phase_3}_final_dream_pcd.ply", pcd)
+    o3d.io.write_point_cloud(save_dir_ /f"{_phase_3}_final_dream_pcd.ply", pcd)
 
-    printc(f"--- {_phase_current}: Saved final point cloud to {save_dir_/_phase_3}_final_dream_pcd.pkl", color='yellow')
+    printc(f"--- {_phase_current}: Saved final point cloud to {save_dir_ /f'{_phase_3}_final_dream_pcd.pkl'}", color='yellow')
     printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')
