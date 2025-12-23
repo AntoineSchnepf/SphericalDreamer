@@ -167,29 +167,6 @@ phase4: # render video
 
 phase5: # render nfs dataset
   visualize_removed_points: False
-  point_size: 3.0
-  bg_color: [0, 0, 0, 1]
-  width: 512
-  height: 512
-
-  render_settings:
-    nb_points: 500
-    nb_samples_per_point: 10
-    ranges: 
-      min_x: 0.0
-      min_y: -0.2
-      max_y: 0.2
-      min_z: -0.1
-      mid_z: -0.1
-      max_z: 1.5
-    framerate:
-      fps: 60
-      fpm: 60
-      fpd_e: 1
-      fpd_a: 1
-
-phase5: # render nfs dataset
-  visualize_removed_points: False
   fix_world: True
   point_size: 3.0
   bg_color: [0, 0, 0, 1]
