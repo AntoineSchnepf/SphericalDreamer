@@ -11,7 +11,6 @@ from my_utils import PointCloud
 from my_utils import set_camera_from_elev_azim, printc
 from tqdm import tqdm
 
-
 _phase_1a = "1a"
 _phase_1b = "1b"
 _phase_2a = "2a"

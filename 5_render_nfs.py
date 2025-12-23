@@ -12,99 +12,46 @@ from my_utils import PointCloud
 from my_utils import set_camera_from_elev_azim, printc
 from tqdm import tqdm
 
+_phase_3 = "3"
+_phase_current = "5"
 
 config = my_utils.fetch_config_via_parser(
-    debug=False, 
-    debug_parser_override=["--config", "Karim/forest.yaml"]
+        debug=False, 
+        debug_parser_override=["--config", "Antoine/debug.yaml"]
 )
 
-# -------- Import pointcloud --------
-repo_path = os.path.dirname(os.path.realpath(__file__))
-t0 = time.time()
-printc(f"Warning: (TO ANTOINE) verify pointcloud filename we are loading!", color='magenta')
-with open(f"{repo_path}/{config.save_dir}/{config.expname}/2b_raw_dream_pcd.pkl", "rb") as f:
-    PointCloud_instance = pickle.load(f)
-printc(f"Loaded raw point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
+seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
+repo_path = os.path.dirname(os.path.realpath(__file__))
+
+# -------------------------------- #
+# ---- PHASE 5 RENDER NFS  ----- #
+# -------------------------------- #
+printc(f"=== [PHASE {_phase_current}]  EXPERIMENT: {config.expname} ===", color='cyan')
+printc(f"=== PHASE {_phase_current} : RENDER NFS ===", color='green')
+
+# -------- Import pointcloud --------
 t0 = time.time()
-pts = PointCloud_instance.pts
-colors = PointCloud_instance.colors
-skip = 1
-pts = pts[::skip]
-colors = colors[::skip]
-PointCloud_instance = PointCloud(pts=pts, colors=colors)
+with open(save_dir_ /f"{_phase_3}_final_dream_pcd.pkl", "rb") as f:
+    PointCloud_instance = pickle.load(f)
 pcd = PointCloud_instance.get_o3d_pointcloud()
-printc(f"Downsampled point cloud (skip = {skip}) to {len(pcd.points)} points in {time.time() - t0:.2f} seconds.", color='yellow')
+printc(f"--- {_phase_current}: Loaded final point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
+
 
 max_x = (config.num_dreams-1) * config.sphere_radius * config.delta_walk
 printc(f"max_X: {max_x}", color='red')
 
-
-# -------- Fix world geometry --------
-if config.phase5.fix_world:
-    pose_left = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ], dtype=np.float32)
-
-    delta_walk = config.sphere_radius * config.delta_walk 
-    translation_direction = my_utils.get_norm_vector(np.array(config.translation_direction, dtype=np.float32))
-    translation = (config.num_dreams-1) * delta_walk * np.array(config.translation_direction)
-    pose_right = my_utils.camera_translation(pose_left, translation) 
-
-    # matplotlib visualization of point cloud
-    pts=np.asarray(pcd.points)
-    colors=np.asarray(pcd.colors)
-
-    # remove points at both ends for now
-    pts_corrected, colors = my_utils.run_corrective_pipeline_on_world(
-        pts=pts,
-        colors=colors,
-        pose_left=pose_left,
-        pose_right=pose_right,
-        translation_direction=translation_direction,
-        verbose=False,
-        plot=False,
-        **config.phase5.world
-    )
-
-    final_pcd = my_utils.PointCloud(pts_corrected, colors).get_o3d_pointcloud()
-else:
-    final_pcd = pcd
-
-# -------- Remove outliers --------
-if config.phase5.remove_outliers.apply:
-    pcd_filtered, ind = final_pcd.remove_statistical_outlier(nb_neighbors=config.phase5.remove_outliers.nb_neighbors, 
-                                                            std_ratio=config.phase5.remove_outliers.std_ratio) 
-
-    printc(f"Filtered point cloud: {len(pcd_filtered.points)} points", color='yellow')
-    printc(f"Removed {len(final_pcd.points) - len(pcd_filtered.points)} outliers", color='yellow')
-else:
-    pcd_filtered = final_pcd
-    ind = np.arange(len(final_pcd.points))
-
-if not np.isfinite(pcd_filtered.points).all():
+if not np.isfinite(pcd.points).all():
     printc("WARNING: Point cloud contains NaN or infinite values", color='red')
 
 
 # -------- Headless rendering (Offscreen) --------
 
-# Optionally visualize removed points
-if config.phase5.visualize_removed_points:
-    out_idx = np.setdiff1d(np.arange(np.asarray(final_pcd.points).shape[0]), np.asarray(ind))
-    pcd_removed = o3d.geometry.PointCloud()
-    pcd_removed.points = o3d.utility.Vector3dVector(np.asarray(final_pcd.points)[out_idx])
-    pcd_removed.paint_uniform_color([0.6, 0.6, 0.6])
-    if not np.isfinite(pcd_removed.points).all():
-        printc("WARNING: Removed point cloud contains NaN or infinite values", color='red')
 
-
-# Save pcd_filtered as .ply
+# Save pcd as .ply
 where_save_pcd = os.path.join(config.save_dir, config.expname, "nfs_dataset", "pointcloud")
 os.makedirs(where_save_pcd, exist_ok=True)
-o3d.io.write_point_cloud(f"{where_save_pcd}/05_pcd_filtered.ply", pcd_filtered)
+o3d.io.write_point_cloud(f"{where_save_pcd}/05_pcd_filtered.ply", pcd)
 printc(f"Saved filtered point cloud to {where_save_pcd}/05_pcd_filtered.ply", color='yellow')
 
 # Create an offscreen renderer (no window)
@@ -130,13 +77,11 @@ mat.shader = "defaultUnlit"
 mat.point_size = config.phase5.point_size 
 
 # Add geometries
-scene.add_geometry("filtered", pcd_filtered, mat, add_downsampled_copy_for_fast_rendering=False)
-if config.phase5.visualize_removed_points:
-    scene.add_geometry("removed", pcd_removed, mat) 
+scene.add_geometry("filtered", pcd, mat, add_downsampled_copy_for_fast_rendering=False)
 
 # -------- Camera control --------
 # Compute a basic bounding box and radius for scaling camera parameters
-bbox = pcd_filtered.get_axis_aligned_bounding_box()
+bbox = pcd.get_axis_aligned_bounding_box()
 center = bbox.get_center()
 extent = bbox.get_extent()
 near = 0.01 * np.linalg.norm(extent)

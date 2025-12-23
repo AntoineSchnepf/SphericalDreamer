@@ -63,7 +63,6 @@ if __name__ == "__main__":
         ldi_mask = PointCloud_instance.ldi_mask
 
         # remove points at both ends for now
-        # TODO: include ldi mask here for floor correction
         pts_corrected, colors_corrected, ldi_mask_corrected = my_utils.run_corrective_pipeline_on_world(
             pts=pts,
             colors=colors,
@@ -79,6 +78,21 @@ if __name__ == "__main__":
         PointCloud_instance = my_utils.PointCloud(pts_corrected, colors_corrected, ldi_mask_corrected)
         printc(f"--- {_phase_current}: Corrected world geometry in {time.time() - t0:.2f} seconds.", color='yellow')
     
+    # 5. Save corrected point cloud
+    t0 = time.time()
+    with open(save_dir_ /f"{_phase_3}_final_dream_pcd_unfiltered.pkl", "wb") as f:
+        pickle.dump(PointCloud_instance, f)
+    printc(f"--- {_phase_current}: Saved unfiltered point cloud to {save_dir_ /f'{_phase_3}_final_dream_pcd_unfiltered.pkl'} in {time.time() - t0:.2f} seconds.", color='yellow')
+
+    # Save pcd as .ply
+    t0 = time.time()
+    my_pcd = PointCloud_instance.get_o3d_pointcloud()
+    printc(f"--- {_phase_current}: Converted to o3d point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
+    t0 = time.time()
+    o3d.io.write_point_cloud(f"{_phase_3}_final_dream_pcd_unfiltered.ply", my_pcd)
+    printc(f"--- {_phase_current}: Saved unfiltered point cloud to {_phase_3}_final_dream_pcd_unfiltered.ply in {time.time() - t0:.2f} seconds.", color='yellow')
+
+
     # 2. Downsample point cloud for faster processing
     n_pts_before = len(PointCloud_instance.pts)
     if config.phase3.pointcloud_downsampling.mode != "deactivated":
@@ -140,6 +154,9 @@ if __name__ == "__main__":
             colors=np.asarray(pcd.colors)
         )
         pickle.dump(PointCloud_instance, f)
+
+    # Save pcd as .ply
+    # o3d.io.write_point_cloud(f"{_phase_3}_final_dream_pcd.ply", pcd)
 
     printc(f"--- {_phase_current}: Saved final point cloud to {save_dir_/_phase_3}_final_dream_pcd.pkl", color='yellow')
     printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')
