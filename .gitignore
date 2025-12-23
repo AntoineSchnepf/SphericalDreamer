@@ -7,3 +7,7 @@ wandb
 submodules
 **.ply
 tests
+temp_run_blender.sh
+temp_run_nerfstudio.sh
+cuda_installer.pyz
+driver_installer.run

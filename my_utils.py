@@ -1,11 +1,14 @@
 import os
 import sys 
+import math
 import numpy as np
 from PIL import Image
 import copy
 import matplotlib.pyplot as plt
 from scipy import ndimage
 import copy
+import ast
+from collections.abc import Mapping, Sequence
 import cv2 
 from sklearn.neighbors import kneighbors_graph, NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
@@ -81,7 +84,8 @@ def printc(str, color=None):
             "magenta": "\033[95m",
             "cyan": "\033[96m",
             "white": "\033[97m",
-            "end": "\033[0m"
+            "end": "\033[0m",
+            "gray": "\033[90m",
         }
         print(f"{colors[color]}{str}{colors['end']}")
 
@@ -116,29 +120,205 @@ def copy_phase_folders(folder_start_with: str, item_start_with: str,
                     else:
                         shutil.copy2(sub, dst_item)
 
-def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
+def _parse_scalar(v: str):
+    """Best-effort parse: int/float/bool/None/list/dict/strings."""
+    v = v.strip()
+    # common bool/none
+    low = v.lower()
+    if low == "true": return True
+    if low == "false": return False
+    if low in ("none", "null"): return None
+    # numbers / literals / lists / dicts / quoted strings
+    try:
+        return ast.literal_eval(v)
+    except Exception:
+        return v  # fallback: raw string
+
+def _set_by_dotted_path(cfg: dict, path: str, value):
+    """
+    Supports:
+      phase2.something
+      phase2.list.0
+      phase2.dict.key
+    """
+    keys = path.split(".")
+    cur = cfg
+    for i, k in enumerate(keys[:-1]):
+        # list index?
+        if isinstance(cur, list) and k.isdigit():
+            idx = int(k)
+            while len(cur) <= idx:
+                cur.append({})
+            cur = cur[idx]
+            continue
+
+        # dict step
+        if not isinstance(cur, Mapping):
+            raise TypeError(f"Cannot descend into non-mapping at '{'.'.join(keys[:i])}'")
+
+        if k not in cur or cur[k] is None:
+            # if next key looks like an int, create a list, else dict
+            cur[k] = [] if keys[i+1].isdigit() else {}
+        cur = cur[k]
+
+    last = keys[-1]
+    if isinstance(cur, list) and last.isdigit():
+        idx = int(last)
+        while len(cur) <= idx:
+            cur.append(None)
+        cur[idx] = value
+    else:
+        cur[last] = value
+
+class ConfigOverrideError(KeyError):
+    pass
+
+def set_by_dotted_path_strict(cfg, path: str, value):
+    """
+    Strict override:
+    - All keys must already exist
+    - List indices must be in range
+    """
+    keys = path.split(".")
+    cur = cfg
+
+    for i, k in enumerate(keys[:-1]):
+        where = ".".join(keys[:i+1])
+
+        if isinstance(cur, Mapping):
+            if k not in cur:
+                raise ConfigOverrideError(f"Config key does not exist: '{where}'")
+            cur = cur[k]
+
+        elif isinstance(cur, Sequence) and not isinstance(cur, (str, bytes)):
+            if not k.isdigit():
+                raise ConfigOverrideError(
+                    f"Expected list index at '{where}', got '{k}'"
+                )
+            idx = int(k)
+            if idx >= len(cur):
+                raise ConfigOverrideError(
+                    f"List index out of range at '{where}' (len={len(cur)})"
+                )
+            cur = cur[idx]
+
+        else:
+            raise ConfigOverrideError(
+                f"Cannot descend into non-container at '{where}'"
+            )
+
+    # ---- set final key ----
+    last = keys[-1]
+    where = ".".join(keys)
+
+    if isinstance(cur, Mapping):
+        if last not in cur:
+            raise ConfigOverrideError(f"Config key does not exist: '{where}'")
+        cur[last] = value
+
+    elif isinstance(cur, Sequence) and not isinstance(cur, (str, bytes)):
+        if not last.isdigit():
+            raise ConfigOverrideError(
+                f"Expected list index at '{where}', got '{last}'"
+            )
+        idx = int(last)
+        if idx >= len(cur):
+            raise ConfigOverrideError(
+                f"List index out of range at '{where}' (len={len(cur)})"
+            )
+        cur[idx] = value
+
+    else:
+        raise ConfigOverrideError(
+            f"Cannot set value at non-container '{where}'"
+        )
+
+def _collect_overrides(unknown_args):
+    """
+    Turn ["--a.b", "5", "--x", "true"] into [("a.b", 5), ("x", True)]
+    Also supports "--a.b=5".
+    """
+    overrides = []
+    i = 0
+    while i < len(unknown_args):
+        token = unknown_args[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+
+        token = token[2:]
+        if "=" in token:
+            k, v = token.split("=", 1)
+            overrides.append((k, _parse_scalar(v)))
+            i += 1
+        else:
+            k = token
+            if i + 1 >= len(unknown_args) or unknown_args[i + 1].startswith("--"):
+                # flag with no value -> treat as True
+                overrides.append((k, True))
+                i += 1
+            else:
+                overrides.append((k, _parse_scalar(unknown_args[i + 1])))
+                i += 2
+    return overrides
+
+def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=False):
+    if debug_parser_override is None:
+        debug_parser_override = []
+
     repo_path = os.path.dirname(os.path.realpath(__file__))
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default="_default.yaml")
     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+
     # TODO: remove lines below
     parser.add_argument('--img_name', type=str, default='FD0')
     print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
 
-    # ---- script args ----
+    # Parse known args + keep the rest as overrides
     if debug:
         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
         printc(debug_message, color="red")
-        args = parser.parse_args(debug_parser_override)
+        args, unknown = parser.parse_known_args(debug_parser_override)
     else:
-        args = parser.parse_args()
+        args, unknown = parser.parse_known_args()
 
-    config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
-    
+    config = Prodict.from_dict(
+        load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml")
+    )
+
+    # Apply overrides
+    for k, v in _collect_overrides(unknown):
+        set_by_dotted_path_strict(config, k, v)
+
     if return_img_name:
         return config, args.img_name
-    
     return config
+
+# Note: This is the old fetch_config_via_parser without override functionality
+# def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
+#     repo_path = os.path.dirname(os.path.realpath(__file__))
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--config', type=str, default="_default.yaml")
+#     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+#     # TODO: remove lines below
+#     parser.add_argument('--img_name', type=str, default='FD0')
+#     print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
+
+#     # ---- script args ----
+#     if debug:
+#         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
+#         printc(debug_message, color="red")
+#         args = parser.parse_args(debug_parser_override)
+#     else:
+#         args = parser.parse_args()
+
+#     config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
+    
+#     if return_img_name:
+#         return config, args.img_name
+    
+#     return config
 
 def setup(config):
     seeds = [config.seed + offset for offset in config.seed_offsets]
@@ -4434,6 +4614,90 @@ def interpolate_camera_keypoints(camera_keypoints, fpm, fpd_e, fpd_a, max_x):
 
         all_cameras.extend(stretch_append(all_x, all_y, all_z, all_elevs, all_azims))
     return all_cameras
+
+def sample_cameras(min_x, max_x, min_y, max_y, min_z, max_z, nb_points, nb_samples_per_point, seed):
+    # Sample points in 3D space
+    rng = np.random.default_rng(seed=seed)
+    points = rng.random((nb_points, 3))
+    points = np.random.rand(nb_points, 3)
+    points[:, 0] = min_x + (max_x - min_x) * points[:, 0]
+    points[:, 1] = min_y + (max_y - min_y) * points[:, 1]
+    points[:, 2] = min_z + (max_z - min_z) * points[:, 2]
+
+    # Sample additional cameras around each point
+    all_cameras = []
+    for point in points:
+        for _ in range(nb_samples_per_point):
+            # Add a random elevation and azimuth angle
+            elev_deg = np.random.uniform(-90, 90)
+            azim_deg = np.random.uniform(0, 360)
+
+            all_cameras.append((point[0], point[1], point[2], elev_deg, azim_deg))
+
+    return all_cameras
+
+
+def get_nerfstudio_frame(
+    cam_pos, elev_deg, azim_deg, width, height, fov_deg, file_path=""
+):
+    """
+    Matches the Open3D camera construction in your set_camera_from_elev_azim().
+    - World Z up
+    - azim around Z: 0 -> +X, 90 -> +Y
+    - elev above XY plane
+    - fov_deg is VERTICAL FOV (because you set FovType.Vertical)
+    Returns a Nerfstudio 'frame' dict (c2w transform_matrix + intrinsics).
+    """
+    cam_pos = np.asarray(cam_pos, dtype=np.float64).reshape(3)
+
+    elev = np.deg2rad(elev_deg)
+    azim = np.deg2rad(azim_deg)
+
+    forward = np.array([
+        np.cos(elev) * np.cos(azim),
+        np.cos(elev) * np.sin(azim),
+        np.sin(elev),
+    ], dtype=np.float64)
+    forward /= (np.linalg.norm(forward) + 1e-12)
+
+    world_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    if abs(np.dot(forward, world_up)) > 0.99:
+        world_up = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+    # Same basis as your Open3D code
+    right = np.cross(forward, world_up)
+    right /= (np.linalg.norm(right) + 1e-12)
+
+    up = np.cross(right, forward)
+    up /= (np.linalg.norm(up) + 1e-12)
+
+    # Nerfstudio convention: columns are [right, up, back], where back = +Z_cam in world
+    back = -forward
+
+    c2w = np.eye(4, dtype=np.float64)
+    c2w[:3, 0] = right
+    c2w[:3, 1] = up
+    c2w[:3, 2] = back
+    c2w[:3, 3] = cam_pos
+
+    # Intrinsics from VERTICAL FOV
+    fov = np.deg2rad(fov_deg)
+    fl_y = 0.5 * height / np.tan(0.5 * fov)
+    fl_x = fl_y * (width / height)  # aspect correction for vertical-FOV definition
+
+    cx = width * 0.5
+    cy = height * 0.5
+
+    return {
+        "file_path": file_path,
+        "transform_matrix": c2w.tolist(),
+        "fl_x": float(fl_x),
+        "fl_y": float(fl_y),
+        "cx": float(cx),
+        "cy": float(cy),
+        "w": int(width),
+        "h": int(height),
+    }
 
 # ----- TESTS -----
 if __name__ == "__main__":
