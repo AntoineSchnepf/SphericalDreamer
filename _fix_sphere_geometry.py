@@ -27,14 +27,14 @@ def is_notebook() -> bool:
 if __name__ == "__main__":
 
     # --- parse args: which sphere to load --- #
-    expname = "24_city"
-    dream_iter = 2
-    open_right = True
+    expname = "24_forest"
+    dream_iter = 1
+    open_right = False
     open_left = False
     # ---------------------------------------- #
 
 
-    save_dir = "OUTPUTS/SphericalDreamerRecurse"
+    save_dir = "/Users/a.schnepf/Documents/code/phd/scene_gen/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse"
     save_dir_ = f"{save_dir}/{expname}"
 
     # --- script init --- 
@@ -64,12 +64,12 @@ if __name__ == "__main__":
         "correct_depth": True,
         "near": NEAR,
         "far": FAR,
-        "correct_walls": True,
+        "correct_walls": False,
         "correct_floor": True,
         "depth_threshold_for_floor_correction": 0.6,
         "remove_sky": False,
         "indoor_or_outdoor": None,
-        "remove_outliers": True,
+        "remove_outliers": False,
         "verbose": False,
         "plot": True,
     }

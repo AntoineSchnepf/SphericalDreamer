@@ -62,7 +62,7 @@ if __name__ == "__main__":
         "final_dream_pcd.pkl",
         "raw_dream_pcd.pkl",
         "pointclouds_zoo.pkl",
-    ][1]
+    ][0]
 
     filename = f"{save_dir_}/{pcd_to_load}"
     with open(filename, 'rb') as f:

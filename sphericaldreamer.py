@@ -8,6 +8,8 @@ import torch
 import numpy as np
 from PIL import Image
 import logging
+import contextlib
+from io import StringIO
 # local imports
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
@@ -104,15 +106,16 @@ class SphericalDreamer:
         returns:
             pano_depth: np.array of shape [pano_h,pano_w] and values in [0-1]
         """
-        self.depth_estimator = Pano_depth_estimation(
-            self.pano_height, 
-            self.pano_width, 
-            self.pano_depth_temp_dir, 
-            self.device, 
-            depth_model="DepthAnythingv2"
-        )
-        pano_depth = self.depth_estimator.get_panodepth(pano_rgb)  #[0-1] 
-        return pano_depth  
+        with contextlib.redirect_stdout(StringIO()):
+            self.depth_estimator = Pano_depth_estimation(
+                self.pano_height, 
+                self.pano_width, 
+                self.pano_depth_temp_dir, 
+                self.device, 
+                depth_model="DepthAnythingv2"
+            )
+            pano_depth = self.depth_estimator.get_panodepth(pano_rgb)  #[0-1] 
+            return pano_depth  
 
     @torch.no_grad()        
     def estimate_pano_depth_egformer(self, pano_rgb:np.array):  

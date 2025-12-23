@@ -5,73 +5,6 @@ import matplotlib.pyplot as plt
 import os
 import time
 
-def concat_with_meta(*arrays):
-    """
-    Concatenate arrays along axis=0 and return:
-      - concatenated array
-      - meta information enabling reconstruction of original arrays
-    
-    Parameters
-    ----------
-    *arrays : list of np.ndarray
-        Arrays compatible for concatenation along axis 0.
-
-    Returns
-    -------
-    concatenated : np.ndarray
-    meta : dict storing reconstruction info
-    """
-    # Validate input
-    if len(arrays) == 0:
-        raise ValueError("At least one array must be provided.")
-
-    # Record first-dimension sizes for later splitting
-    lengths = [arr.shape[0] for arr in arrays]
-
-    # Perform concatenation
-    concatenated = np.concatenate(arrays, axis=0)
-
-    # Meta info: lengths + total number of arrays
-    meta = {
-        "lengths": lengths,
-        "n_arrays": len(arrays)
-    }
-
-    return concatenated, meta
-
-def undo_concat(concatenated, meta):
-    """
-    Undo a concatenation operation performed by concat_with_meta.
-    
-    Parameters
-    ----------
-    concatenated : np.ndarray
-        The concatenated output array.
-    meta : dict
-        Must contain:
-          - "lengths": list of sizes along axis 0 for original arrays
-          - "n_arrays": number of arrays originally concatenated
-
-    Returns
-    -------
-    arrays : list of np.ndarray
-        The original arrays recovered.
-    """
-    lengths = meta["lengths"]
-    n_arrays = meta["n_arrays"]
-
-    # Ensure the metadata matches
-    if len(lengths) != n_arrays:
-        raise ValueError("Mismatch between number of arrays and lengths metadata.")
-
-    arrays = []
-    start = 0
-    for L in lengths:
-        end = start + L
-        arrays.append(concatenated[start:end])
-        start = end
-
-    return arrays
 
 def check_partition(*masks):
     """Return True if masks are disjoint and cover the full image."""
@@ -88,6 +21,8 @@ def get_harmonic_blending_mask(missing_info_mask):
     """
     missing_info_mask: np.array of shape [H, W] with dtype bool. True where info is missing i.e. where we inpainted
     """
+    # TODO: I think we should erode mask1 a bit. Make the boundary more "inside" mask1
+    missing_info_mask = my_utils.dilate_mask(missing_info_mask, pixels=3)
     mask1 = ~missing_info_mask
     mask2 = missing_info_mask
     boundary = find_boundaries(mask1, mode='inner', background=False)  # [H, W]
@@ -96,7 +31,7 @@ def get_harmonic_blending_mask(missing_info_mask):
     assert check_partition(mask1, mask2, boundary), "Masks are not a valid partition of the image"
     return mask1, mask2, boundary
 
-def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=False, output_prefix="", where_save=None):
+def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, phase, logging=False, where_save=None):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
         - points in the good region of warped_depth_interp stay unchanged
@@ -119,7 +54,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(os.path.join(where_save, output_prefix+"07_harmonic_blending_masks.png"))
+        plt.savefig(where_save / phase / "07_harmonic_blending_masks.png")
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -178,7 +113,7 @@ def harmonic_blend_of_depths(colors, warped_depth_interp, depth_estimated, missi
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_harmonic.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_harmonic.png")
         plt.show()
 
     return pts_deformed, colors_out, pcd_harmonic, blended_depth_harmonic
@@ -192,15 +127,15 @@ def harmonic_blend_of_depths_ldi(
         sphere_radius, 
         height, 
         width, 
+        phase,
         logging=False, 
-        output_prefix="", 
         where_save=None,
 
         # ldi args
         ldi_depth=None,
         ldi_colors=None, 
         ldi_mask=None,
-        ):
+    ):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
         - points in the good region of warped_depth_interp stay unchanged
@@ -223,7 +158,7 @@ def harmonic_blend_of_depths_ldi(
         plt.subplot(1,3,3)
         plt.imshow(mask_boundary, cmap='gray')
         plt.title("Mask boundary")
-        plt.savefig(os.path.join(where_save, output_prefix+"07_harmonic_blending_masks.png"))
+        plt.savefig(where_save / phase / "07_harmonic_blending_masks.png")
         plt.show()
     
     mask_keep, mask_deform, mask_boundary = get_harmonic_blending_mask(missing_info_mask)
@@ -262,8 +197,8 @@ def harmonic_blend_of_depths_ldi(
         to_cat_mask.append(_mask_ldi)
 
 
-    pts_deform, cat_meta = concat_with_meta(*to_cat)
-    _mask_boundary, _ = concat_with_meta(*to_cat_mask)
+    pts_deform, cat_meta = my_utils.concat_with_meta(*to_cat)
+    _mask_boundary, _ = my_utils.concat_with_meta(*to_cat_mask)
 
     # Deformation
     assert np.any(np.isnan(pts_deform)) == False, "Error: pts_deform contains NaNs"
@@ -282,7 +217,7 @@ def harmonic_blend_of_depths_ldi(
     t1 = time.time()
     print(f"Harmonic deformation took {t1 - t0:.1f}s")
 
-    undid_cat = undo_concat(pts_deformED, cat_meta)
+    undid_cat = my_utils.undo_concat(pts_deformED, cat_meta)
     pts_deformED_exb = undid_cat[0]
     pts_deformED_boundary = undid_cat[1]
 
@@ -309,7 +244,7 @@ def harmonic_blend_of_depths_ldi(
         plt.imshow(blended_depth_harmonic, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Harmonic')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_harmonic.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_harmonic.png")
         plt.show()
 
     res = {
@@ -329,7 +264,7 @@ def harmonic_blend_of_depths_ldi(
 
     return res
 
-def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, logging=False, output_prefix="", where_save=None):
+def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_info_mask, pose, sphere_radius, height, width, phase, logging=False, where_save=None):
     blended_depth = np.zeros_like(warped_depth_interp)
     blended_depth[missing_info_mask] = depth_estimated[missing_info_mask]
     blended_depth[~missing_info_mask] = warped_depth_interp[~missing_info_mask]
@@ -345,7 +280,7 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
         plt.imshow(blended_depth, cmap='plasma')
         plt.colorbar()
         plt.title('Blended Depth Naive')
-        plt.savefig(os.path.join(where_save, output_prefix+"08_blended_depth_naive.png"))
+        plt.savefig(where_save / phase / "08_blended_depth_naive.png")
         plt.show()
 
     return pcd_naive, blended_depth

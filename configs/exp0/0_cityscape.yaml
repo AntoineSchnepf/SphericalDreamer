@@ -1,0 +1,9 @@
+expname: Cityscape
+prompt: A dense urban environment filled with tall buildings, interconnected streets, public squares, and layered infrastructure, alive with movement, lights, and architectural variety.
+
+load_phase1a_from: Cityscape
+load_phase1b_from: Cityscape
+load_phase2a_from: Cityscape
+load_phase2b_from: Cityscape
+load_phase2c_from: Cityscape
+load_phase3_from: null #TODO: implemtement this

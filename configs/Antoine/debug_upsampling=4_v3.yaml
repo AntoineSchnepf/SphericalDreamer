@@ -1,0 +1,24 @@
+# ---meta---
+expname: debug_upsampling=4_v3
+
+load_phase1a_from: debug_upsampling=4_v2
+load_phase1b_from: debug_upsampling=4_v2
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+
+# ----- args generation -----
+prompt: A serene forest scene with a small stream, dappled sunlight filtering through the leaves, realism style.
+
+num_dreams: 2
+pcd_upsampling_factor: 4
+
+
+phase2: # pairs of sphere inpainting + deformation
+  outliers_removal: 
+    apply_on_fg: True
+    apply_on_ldi: False
+    options:
+      nb_neighbors: 20
+      std_ratio: 1.8
+      verbose: True

@@ -25,6 +25,13 @@ with contextlib.redirect_stdout(StringIO()):
 import my_utils
 from my_utils import printc
 
+_phase_1a = "1a"
+_phase_1b = "1b"
+_phase_2a = "2a"
+_phase_2b = "2b"
+_phase_2c = "2c"
+
+_phase_current = _phase_1a
 
 
 if __name__ == "__main__":
@@ -35,19 +42,19 @@ if __name__ == "__main__":
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
-    spherical_dreamer = SphericalDreamer(
-        pano_width=width,
-        pano_height=height,
-        pano_depth_temp_dir='/tmp/pano_depth_temp',
-        depth_model=config.depth_model,
-    )
-
-
     # ----------------------------------------------------------------- #
     # ---- PHASE 1. GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ----- #
     # ----------------------------------------------------------------- #
     printc(f"=== [PHASE 1-A] EXPERIMENT: {config.expname} ===", color='cyan')
-    if not config.load_phase1_from:
+    if not config.load_phase1a_from:
+
+        spherical_dreamer = SphericalDreamer(
+            pano_width=width,
+            pano_height=height,
+            pano_depth_temp_dir='/tmp/pano_depth_temp',
+            depth_model=config.depth_model,
+        )
+
         printc("=== PHASE 1-A: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH ===", color='green')
         for i in range(config.num_dreams):
             printc(f"--- 1-A: Dreaming {i:02d} / {config.num_dreams} ---", color='yellow')
@@ -58,17 +65,19 @@ if __name__ == "__main__":
                 pano_rgb=pano_rgb,
                 depth=depth,
                 dream=i,
-                save_dir_=save_dir_
+                save_dir_=save_dir_ ,
+                phase=_phase_current,
             )
         printc("PHASE 1-A SUCCESSFULLY COMPLETED!", color='green')
     else:
         printc("SKIPPING PHASE 1-A: GENERATE INDEPENDENT SPHERICAL IMAGES + DEPTH", color='magenta')
-        printc(f"Loading instead from {config.load_phase1_from}", color='magenta')
-        source_phase1_path = Path(config.save_dir) / config.load_phase1_from
-        dest_phase1_path = Path(save_dir_)
+        printc(f"Loading instead from {config.load_phase1a_from}", color='magenta')
+
+        source_phase1a_path = Path(config.save_dir) / config.load_phase1a_from
+        dest_phase1a_path = Path(save_dir_)
+
         my_utils.copy_phase_folders(
-            folder_start_with="dream_",
-            item_start_with="",
-            source_dir=source_phase1_path,
-            dest_dir=dest_phase1_path
+            source_dir=source_phase1a_path,
+            dest_dir=dest_phase1a_path,
+            phase=_phase_current,
         )
