@@ -20,6 +20,7 @@ import copy
 from functools import partial
 from skimage.segmentation import find_boundaries
 from scipy.ndimage import maximum_filter, minimum_filter
+from scipy import ndimage as ndi
 import matplotlib.pyplot as plt
 import time
 import pickle as pkl
@@ -46,6 +47,40 @@ _phase_2c = "2c"
 
 _phase_current = _phase_2a
 
+import numpy as np
+
+
+def largest_connected_component(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
+    """
+    Return a binary mask containing only the largest connected component.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2D (or ND) binary mask. Non-zero values are treated as foreground.
+    connectivity : int
+        For 2D: 1 => 4-connected, 2 => 8-connected.
+        For 3D: 1 => 6-connected, 2 => 18-connected, 3 => 26-connected, etc.
+
+    Returns
+    -------
+    np.ndarray
+        Binary mask of the largest connected component (same shape as input).
+    """
+    mask = mask.astype(bool)
+    if not mask.any():
+        return np.zeros_like(mask, dtype=bool)
+
+    structure = ndi.generate_binary_structure(mask.ndim, connectivity)
+    labels, num = ndi.label(mask, structure=structure)
+
+    # Count pixels per component (excluding background label 0)
+    counts = np.bincount(labels.ravel())
+    counts[0] = 0
+    largest_label = counts.argmax()
+
+    return labels == largest_label
+
 def get_missing_info_mask(operations, visited_pixels):
     missing_info_masks = [~visited_pixels]
     for op in operations:
@@ -57,6 +92,7 @@ def get_missing_info_mask(operations, visited_pixels):
 def render_and_inpaint_from_pose(
         current_points, 
         current_colors, 
+        current_ldi_mask,
         camera_pose, 
         height,
         width,
@@ -75,24 +111,31 @@ def render_and_inpaint_from_pose(
     if rendering_version==0:
         render_fn = render_v0
     elif rendering_version==1:
+        raise NotImplementedError("Rendering version 1 is deprecated since 17/12/2025 for ldi mask rendering. Please use version 0.")
         render_fn = render_v1
     elif rendering_version==2:
+        raise NotImplementedError("Rendering version 2 is deprecated since 17/12/2025 for ldi mask rendering. Please use version 0.")
         render_fn = render_v2
     else:
         raise ValueError(f"rendering_version {rendering_version} not recognized!")
     t0 = time.time()
-    warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels = render_fn(
+    warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels, is_visited_ldi = render_fn(
         all_pts_world=current_points, 
         all_colors_world=current_colors, 
+        all_ldi_mask=current_ldi_mask,
         pose=camera_pose,
         height=height,
         width=width
     )
     print(f"Rendered all points from intermediate camera in {time.time()-t0:.1f} seconds (Render v{rendering_version})!")
 
+    # largest connected component on visited pixels minus LDI visited pixels
+    visited_pixels_no_ldi = visited_pixels & (~is_visited_ldi)
+    visited_pixels_no_ldi_only_inner = ~largest_connected_component(~visited_pixels_no_ldi)
+    missing_info_mask = visited_pixels & visited_pixels_no_ldi_only_inner
 
     # 5. Get missing info mask
-    missing_info_mask, missing_info_masks_tile = get_missing_info_mask(masking_operations, visited_pixels) 
+    missing_info_mask, missing_info_masks_tile = get_missing_info_mask(masking_operations, missing_info_mask) 
     where_depth_nan = np.isnan(warped_depth_interp)
     missing_info_mask = missing_info_mask | where_depth_nan
     inpainting_mask = missing_info_mask # TODO: (Antoine, 14 oct) The inpainting mask is currently composed of both <<large missing regions due to limited covering of the main spheres>> and <<small holes due to occlusions>>. We could separate these two cases and do something neater?.
@@ -139,7 +182,7 @@ def render_and_inpaint_from_pose(
     # 7. Estimate depth
     if not skip_inpainting:
         depth_estimated = spherical_dreamer.estimate_pano_depth(
-            pano_rgb=np.array(pano_rgb_inpainted)
+            pano_rgb=np.array(pano_inpainted_raw)
         )
         np.save(where_save / _phase_current / ".cache" / "estimated_depth.npy", depth_estimated)
     else:
@@ -333,7 +376,7 @@ if __name__ == "__main__":
 
         # LOOP
         for i in range(1, config.num_dreams):
-            printc(f"--- {_phase_current}: Inpainting+Alignment Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
+            printc(f"--- {_phase_current}: Inpainting Phase {i:02d} / {config.num_dreams-1} ---", color='yellow')
             save_dir__ = save_dir_ / f"align_{i:02d}"
             os.makedirs(save_dir__ / _phase_current / ".cache", exist_ok=True)
 
@@ -363,51 +406,26 @@ if __name__ == "__main__":
 
 
             # 4. Generate missing points from pose, inpaint, estimate depth (inside function below)
-            # current_points=np.concatenate((
-            #     sphere1.right_opened.get_world_pcd().pts, sphere2.left_opened.get_world_pcd().pts
-            # ), axis=0)
-            # current_colors=np.concatenate((
-            #     sphere1.right_opened.get_world_pcd().colors, sphere2.left_opened.get_world_pcd().colors
-            # ), axis=0)
-            
-            # Filter out some LDI points to avoid inpainting artifacts.
-            # Specifically, we remove LDI points that are below the fg points, normally invisble, but now perceived when opening the sphere.
-            # They otherwise cause drastical changes in inpainitng
             s1_pts = sphere1.right_opened.get_world_pcd().pts
             s1_colors = sphere1.right_opened.get_world_pcd().colors
             s1_ldi_mask = sphere1.right_opened.get_world_pcd().ldi_mask
-
-            s1_pts_ldi = s1_pts[s1_ldi_mask]
-            s1_pts_fg = s1_pts[~s1_ldi_mask]
-            s1_colors_ldi = s1_colors[s1_ldi_mask]
-            s1_colors_fg = s1_colors[~s1_ldi_mask]
-
-            # filter out    
-            x_thresh = 0.4 # TODO: add this to config
-            ldi_filtering_mask = get_mask_filter_points_with_pose(s1_pts_ldi, pose=pose1, direction='right', x_thresh=x_thresh)
-            s1_pts_ldi = s1_pts_ldi[ldi_filtering_mask]
-            s1_colors_ldi = s1_colors_ldi[ldi_filtering_mask]
 
             # same for sphere2
             s2_pts = sphere2.left_opened.get_world_pcd().pts
             s2_colors = sphere2.left_opened.get_world_pcd().colors
             s2_ldi_mask = sphere2.left_opened.get_world_pcd().ldi_mask
 
-            s2_pts_ldi = s2_pts[s2_ldi_mask]
-            s2_pts_fg = s2_pts[~s2_ldi_mask]
-            s2_colors_ldi = s2_colors[s2_ldi_mask]
-            s2_colors_fg = s2_colors[~s2_ldi_mask]
-
-            s2_ldi_filtering_mask = get_mask_filter_points_with_pose(s2_pts_ldi, pose=pose2, direction='left', x_thresh=x_thresh)
-            s2_pts_ldi = s2_pts_ldi[s2_ldi_filtering_mask]
-            s2_colors_ldi = s2_colors_ldi[s2_ldi_filtering_mask]
 
             current_points=np.concatenate((
-                s1_pts_fg, s1_pts_ldi, s2_pts_fg, s2_pts_ldi
+                s1_pts, s2_pts
             ), axis=0)
             current_colors=np.concatenate((
-                s1_colors_fg, s1_colors_ldi, s2_colors_fg, s2_colors_ldi
+                s1_colors, s2_colors
             ), axis=0)
+            current_ldi_mask=np.concatenate((
+                s1_ldi_mask, s2_ldi_mask
+            ), axis=0)
+
 
             masking_operations = [
                 partial(minimum_filter, size=(3,3), axes=(0,1)),
@@ -419,6 +437,7 @@ if __name__ == "__main__":
             res_render_inpaint = render_and_inpaint_from_pose(
                 current_points=current_points, 
                 current_colors=current_colors, 
+                current_ldi_mask=current_ldi_mask,
                 camera_pose=pose_intermediate,
                 height=height,
                 width=width,

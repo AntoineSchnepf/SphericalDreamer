@@ -1045,9 +1045,9 @@ class PointCloud:
         pts: np.array of shape [..., 3]
         colors: np.array of shape [..., 3] with values in [0-1]
         """
-        self.pts = pts.reshape(-1, 3)
-        self.colors = colors.reshape(-1, 3)
-        self.ldi_mask = ldi_mask.reshape(-1) if ldi_mask is not None else None
+        self.pts = pts.reshape(-1, 3).astype(np.float32)
+        self.colors = colors.reshape(-1, 3).astype(np.float32)
+        self.ldi_mask = ldi_mask.reshape(-1).astype(bool) if ldi_mask is not None else None
         assert self.pts.shape[0] == self.colors.shape[0], "Error: pts and colors must have the same number of points"
 
     def get_o3d_pointcloud(self):
@@ -1974,7 +1974,7 @@ class GeometryTransforms:
 
     @staticmethod
     def correct_floor_v3(
-        pts_carte, theta, colors, correct_until_depth_metric,
+        pts_carte, ldi_mask, theta, colors, correct_until_depth_metric,
         *,
         dx=0.1, dy=0.1, q=10.0,
         theta_min=-np.pi, theta_max=0.0,
@@ -2004,11 +2004,13 @@ class GeometryTransforms:
         -------
         X, Y, Z_corrected : ndarrays
         """
-
+        ldi_mask = np.asarray(ldi_mask, dtype=bool)
         X, Y, Z = pts_carte[..., 0], pts_carte[..., 1], pts_carte[..., 2]
+        X_4corr, Y_4corr, Z_4corr = X[~ldi_mask], Y[~ldi_mask], Z[~ldi_mask]
+        theta_4corr = theta[~ldi_mask]
 
         C_func, (xc, yc), Zfloor = GeometryTransforms.build_floor_correction(
-            X, Y, Z, theta,
+            X_4corr, Y_4corr, Z_4corr, theta_4corr,
             correct_until_depth_metric=correct_until_depth_metric,
             dx=dx, dy=dy, q=q,
             theta_min=theta_min, theta_max=theta_max,
@@ -2019,7 +2021,7 @@ class GeometryTransforms:
             plot_horizon=plot,
             plot_floor_profile=plot,
             horizon_deg=horizon_deg,
-            horizon_colors=colors,
+            horizon_colors=colors[~ldi_mask],
         )
 
         C_all = C_func(X, Y)
@@ -2447,6 +2449,7 @@ def run_corrective_pipeline_on_sphere(
 def run_corrective_pipeline_on_world(
     pts, 
     colors,
+    ldi_mask,
     pose_left,
     pose_right,
     translation_direction,
@@ -2571,6 +2574,7 @@ def run_corrective_pipeline_on_world(
         theta = carte2sph_3D(final_pts)[..., 0]
         final_pts = GeometryTransforms.correct_floor_v3(
             pts_carte=final_pts,
+            ldi_mask=ldi_mask,
             theta=theta,
             colors=colors,
             correct_until_depth_metric=correct_until_depth_metric,
@@ -2594,7 +2598,7 @@ def run_corrective_pipeline_on_world(
         if verbose:
             print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
 
-    return final_pts, colors
+    return final_pts, colors, ldi_mask
     
 # ----------------------------- #
 # ----- Utility functions ----- #

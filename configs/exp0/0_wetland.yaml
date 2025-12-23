@@ -1,2 +1,9 @@
 expname: Wetlands
 prompt: A murky wetlands environment of shallow pools, twisted trees, thick vegetation, and misty air, where land and water blend together unpredictably.
+
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null #TODO: implemtement this

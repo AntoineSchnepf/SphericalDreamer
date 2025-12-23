@@ -1,2 +1,9 @@
 expname: Ruins
 prompt: A crumbling historical environment filled with broken stone structures, partially collapsed walls, overgrown pathways, and remnants of a once-thriving civilization reclaimed by time.
+
+load_phase1a_from: Ruins
+load_phase1b_from: Ruins
+load_phase2a_from: Ruins
+load_phase2b_from: Ruins
+load_phase2c_from: Ruins
+load_phase3_from: null #TODO: implemtement this

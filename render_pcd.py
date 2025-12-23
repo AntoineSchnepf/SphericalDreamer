@@ -101,6 +101,7 @@ def prepare_coords(coord_cam2, height, width, **additional_data):
     colors = additional_data.get('colors')
     coord_cam1 = additional_data.get('coord_cam1')
     depth_cam2 = additional_data.get('depth_cam2')
+    ldi_mask = additional_data.get('ldi_mask')
 
     # Round target coordinates to nearest integer pixel (u -> x/col, v -> y/row)
     u = coord_cam2[:, 0]
@@ -128,7 +129,9 @@ def prepare_coords(coord_cam2, height, width, **additional_data):
         out['depth_cam2'] = depth_cam2[in_bounds].astype(np.float32)
     if coord_cam1 is not None:
         out['coord_cam1'] = coord_cam1[in_bounds]
-
+    if ldi_mask is not None:
+        out['ldi_mask'] = ldi_mask[in_bounds]
+    
     return out
 
 def get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width):
@@ -158,10 +161,11 @@ def get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width):
     # Winners' data
     return winners
 
-def splat_with_z_buffer(colors, depth_cam2, coord_cam2, height, width):
+def splat_with_z_buffer(colors, ldi_mask, depth_cam2, coord_cam2, height, width):
     """
     This function takes as input: 
         - `colors` an array of colors (N, 3) in [0-1]
+        - `ldi_mask` an array of booleans (N,) indicating whether the point is from LDI or foreground
         - `depth_cam2` an array of depth values (N,) in [0-1]
         - `coord_cam2` an array of 2D coordinates in the image frame (N, 2) in pixel coordinates
     From this information, is returned 
@@ -180,11 +184,12 @@ def splat_with_z_buffer(colors, depth_cam2, coord_cam2, height, width):
 
     # Flatten to [N, ...]
     colors   = colors.reshape((-1, 3))
+    ldi_mask = ldi_mask.reshape((-1,))
     coord_cam2 = coord_cam2.reshape((-1, 2))
     depth_cam2 = depth_cam2.reshape((-1,))
 
     # Prepare coordinates (rounding, in-bounds filtering)
-    out = prepare_coords(coord_cam2, height, width, colors=colors, depth_cam2=depth_cam2)
+    out = prepare_coords(coord_cam2, height, width, colors=colors, ldi_mask=ldi_mask, depth_cam2=depth_cam2)
 
     # --- I. Z-buffer Splatting to find winners ----
     winners = get_winners_z_buffer_splatting(depth_cam2, coord_cam2, height, width)
@@ -194,6 +199,7 @@ def splat_with_z_buffer(colors, depth_cam2, coord_cam2, height, width):
     v_win_r = out['v_r'][winners]
     depths_win = out['depth_cam2'][winners]
     colors_win = out['colors'][winners]   
+    ldi_mask_win = out['ldi_mask'][winners]
     u_win_f = out['u_float'][winners]       
     v_win_f = out['v_float'][winners]  
 
@@ -201,6 +207,8 @@ def splat_with_z_buffer(colors, depth_cam2, coord_cam2, height, width):
     # 1. Visited mask
     visited = np.zeros((height, width), dtype=bool)
     visited[v_win_r, u_win_r] = True
+    is_visited_ldi = np.zeros((height, width), dtype=bool)
+    is_visited_ldi[v_win_r, u_win_r] = ldi_mask_win
 
     # 2. Naive without Interpolation
     warped_img   = np.zeros((height, width, 3), dtype=np.float32)
@@ -208,9 +216,9 @@ def splat_with_z_buffer(colors, depth_cam2, coord_cam2, height, width):
     warped_img[v_win_r, u_win_r]   = colors_win
     warped_depth[v_win_r, u_win_r] = depths_win
 
-    return warped_img, warped_depth, visited
+    return warped_img, warped_depth, visited, is_visited_ldi
 
-def render_v0(all_pts_world, all_colors_world, pose, height, width):
+def render_v0(all_pts_world, all_colors_world, all_ldi_mask, pose, height, width):
 
     # convert to ERP + Depth representation
     points_3D_cam2_sph = my_utils.world2cam_sph_3D(all_pts_world, pose)  
@@ -219,8 +227,9 @@ def render_v0(all_pts_world, all_colors_world, pose, height, width):
     points_2D_cam2_erp = my_utils.sph2erp_2D(points_2D_cam2_sph, height, width)  # [N, 2]
 
     # Splatting 
-    warped_img, warped_depth, visited_pixels = splat_with_z_buffer(
+    warped_img, warped_depth, visited_pixels, is_visited_ldi = splat_with_z_buffer(
         colors=all_colors_world,
+        ldi_mask=all_ldi_mask,
         depth_cam2=depth_cam2,
         coord_cam2=points_2D_cam2_erp,
         height=height,
@@ -232,7 +241,7 @@ def render_v0(all_pts_world, all_colors_world, pose, height, width):
         warped_img, warped_depth, visited_pixels,
     )
 
-    return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels
+    return warped_img, warped_depth, warped_img_interp, warped_depth_interp, visited_pixels, is_visited_ldi
 
 def render_perspective_v0(all_pts_world, all_colors_world, 
                           pose, height, width, fx, fy, cx, cy,):

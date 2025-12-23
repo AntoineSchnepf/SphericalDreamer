@@ -1,2 +1,9 @@
 expname: Stronghold
 prompt: A fortified medieval castle environment with high stone walls, watchtowers, inner courtyards, and surrounding battlements, set within rugged terrain that emphasizes defense and isolation.
+
+load_phase1a_from: Stronghold
+load_phase1b_from: Stronghold
+load_phase2a_from: Stronghold
+load_phase2b_from: Stronghold
+load_phase2c_from: Stronghold
+load_phase3_from: null #TODO: implemtement this

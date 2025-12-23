@@ -228,9 +228,10 @@ if __name__ == "__main__":
 
         all_pts_world = np.array([]).reshape(0, 3)
         all_colors_world = np.array([]).reshape(0, 3)
+        all_ldi_mask_world = np.array([]).reshape(0, )
 
         for i in range(1, config.num_dreams):
-            print(f"--- {_phase_current}: Inpainting+Alignment {i:02d} / {config.num_dreams-1} ---")
+            print(f"--- {_phase_current}: Harmonic Blending {i:02d} / {config.num_dreams-1} ---")
 
             pointcloud_zoo = {}
             save_dir__ = save_dir_ / f"align_{i:02d}"
@@ -344,17 +345,24 @@ if __name__ == "__main__":
                 
                 new_mask1_zeros = np.zeros(new_pts1.shape[:-1])
                 new_mask2_zeros = np.zeros(new_pts2.shape[:-1])
+
                 new_mask1_ones = np.ones(new_pts1_ldi.shape[:-1])
                 new_mask2_ones = np.ones(new_pts2_ldi.shape[:-1])
 
-                new_pts1           = np.concatenate((new_pts1,           new_pts1_ldi), axis=0)
-                new_colors1        = np.concatenate((new_colors1,        new_colors1_ldi), axis=0)
-                new_mask_ldi1      = np.concatenate((new_mask1_zeros,    new_mask1_ones), axis=0) 
-                new_pts2           = np.concatenate((new_pts2,           new_pts2_ldi), axis=0)
-                new_colors2        = np.concatenate((new_colors2,        new_colors2_ldi), axis=0)
-                new_mask_ldi2      = np.concatenate((new_mask2_zeros,    new_mask2_ones), axis=0)
-                new_pts_neutral    = np.concatenate((new_pts_neutral,    new_pts_neutral_ldi), axis=0)
-                new_colors_neutral = np.concatenate((new_colors_neutral, new_colors_neutral_ldi), axis=0)
+                new_mask_neutral_zeros = np.zeros(new_pts_neutral.shape[:-1])
+                new_mask_neutral_ones = np.ones(new_pts_neutral_ldi.shape[:-1])
+
+                new_pts1           = np.concatenate((new_pts1,               new_pts1_ldi), axis=0)
+                new_colors1        = np.concatenate((new_colors1,            new_colors1_ldi), axis=0)
+                new_mask_ldi1      = np.concatenate((new_mask1_zeros,        new_mask1_ones), axis=0) 
+    
+                new_pts2           = np.concatenate((new_pts2,               new_pts2_ldi), axis=0)
+                new_colors2        = np.concatenate((new_colors2,            new_colors2_ldi), axis=0)
+                new_mask_ldi2      = np.concatenate((new_mask2_zeros,        new_mask2_ones), axis=0)
+                    
+                new_pts_neutral    = np.concatenate((new_pts_neutral,        new_pts_neutral_ldi), axis=0)
+                new_colors_neutral = np.concatenate((new_colors_neutral,     new_colors_neutral_ldi), axis=0)
+                new_mask_neutral   = np.concatenate((new_mask_neutral_zeros, new_mask_neutral_ones), axis=0)
 
             sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1)
             sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2)
@@ -367,24 +375,30 @@ if __name__ == "__main__":
             
             #10.a Points from sphere1
             if i == 1: # first iteration: sphere1 only has right opened
-                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = sphere1.right_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
+                s1_ro = sphere1.right_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = s1_ro
+                all_pts_world = np.concatenate((all_pts_world, s1_ro.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s1_ro.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_ro.ldi_mask), axis=0)
 
             else: # later iterations: sphere1 has both opened
-                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = sphere1.both_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
-
+                s1_bo = sphere1.both_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = s1_bo
+                all_pts_world = np.concatenate((all_pts_world, s1_bo.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s1_bo.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_bo.ldi_mask), axis=0)
             #10.b Neutral points
             all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
             all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
+            all_ldi_mask_world = np.concatenate((all_ldi_mask_world, new_mask_neutral), axis=0)
 
             #10.c Points from sphere2 (only last iter)
             if i == config.num_dreams - 1: 
-                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere2_open'] = sphere2.left_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
+                s2_lo = sphere2.left_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere2_open'] = s2_lo
+                all_pts_world = np.concatenate((all_pts_world, s2_lo.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s2_lo.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s2_lo.ldi_mask), axis=0)
                 assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
 
             # save pcd
@@ -396,7 +410,8 @@ if __name__ == "__main__":
             pkl.dump(
                 my_utils.PointCloud(
                     pts=all_pts_world,
-                    colors=all_colors_world
+                    colors=all_colors_world,
+                    ldi_mask=all_ldi_mask_world,
                 ), f)
 
         printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')

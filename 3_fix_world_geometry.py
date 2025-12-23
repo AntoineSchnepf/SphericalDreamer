@@ -22,7 +22,7 @@ _phase_current = _phase_3
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
         debug=False, 
-        debug_parser_override=["--config", "Antoine/debug.yaml"]
+        debug_parser_override=["--config", "exp0/0_caverns.yaml"]
     )
 
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
@@ -42,6 +42,43 @@ if __name__ == "__main__":
     printc(f"--- {_phase_current}: Loaded raw point cloud in {time.time() - t0:.2f} seconds ---", color='yellow')
     t0 = time.time()
 
+    # 2. Fix world geometry
+    if config.phase3.world_correction.apply:
+        t0 = time.time()
+        pose_left = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+
+        delta_walk = config.sphere_radius * config.delta_walk 
+        translation_direction = my_utils.get_norm_vector(np.array(config.translation_direction, dtype=np.float32))
+        translation = (config.num_dreams-1) * delta_walk * np.array(config.translation_direction)
+        pose_right = my_utils.camera_translation(pose_left, translation) 
+
+        # matplotlib visualization of point cloud
+        pts = PointCloud_instance.pts
+        colors = PointCloud_instance.colors
+        ldi_mask = PointCloud_instance.ldi_mask
+
+        # remove points at both ends for now
+        # TODO: include ldi mask here for floor correction
+        pts_corrected, colors_corrected, ldi_mask_corrected = my_utils.run_corrective_pipeline_on_world(
+            pts=pts,
+            colors=colors,
+            ldi_mask=ldi_mask,
+            pose_left=pose_left,
+            pose_right=pose_right,
+            translation_direction=translation_direction,
+            verbose=False,
+            plot=True,
+            **config.phase3.world_correction.options
+        )
+
+        PointCloud_instance = my_utils.PointCloud(pts_corrected, colors_corrected, ldi_mask_corrected)
+        printc(f"--- {_phase_current}: Corrected world geometry in {time.time() - t0:.2f} seconds.", color='yellow')
+    
     # 2. Downsample point cloud for faster processing
     n_pts_before = len(PointCloud_instance.pts)
     if config.phase3.pointcloud_downsampling.mode != "deactivated":
@@ -82,39 +119,7 @@ if __name__ == "__main__":
         printc(f"--- {_phase_current}: No downsampling applied to point cloud, keeping {n_pts_before} points.", color='yellow')
 
 
-    # 3. Fix world geometry
-    if config.phase3.world_correction.apply:
-        t0 = time.time()
-        pose_left = np.array([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float32)
 
-        delta_walk = config.sphere_radius * config.delta_walk 
-        translation_direction = my_utils.get_norm_vector(np.array(config.translation_direction, dtype=np.float32))
-        translation = (config.num_dreams-1) * delta_walk * np.array(config.translation_direction)
-        pose_right = my_utils.camera_translation(pose_left, translation) 
-
-        # matplotlib visualization of point cloud
-        pts=np.asarray(pcd.points)
-        colors=np.asarray(pcd.colors)
-
-        # remove points at both ends for now
-        pts_corrected, colors = my_utils.run_corrective_pipeline_on_world(
-            pts=pts,
-            colors=colors,
-            pose_left=pose_left,
-            pose_right=pose_right,
-            translation_direction=translation_direction,
-            verbose=False,
-            plot=False,
-            **config.phase3.world_correction.options
-        )
-
-        pcd = my_utils.PointCloud(pts_corrected, colors).get_o3d_pointcloud()
-        printc(f"--- {_phase_current}: Corrected world geometry in {time.time() - t0:.2f} seconds.", color='yellow')
 
     # 4. Remove outliers
     if config.phase3.remove_outliers.apply:
