@@ -26,3 +26,16 @@ phase4: # render video
     correct_depth: False
   remove_outliers:
     apply: True
+
+# phase5: # render video
+#   fix_world: True
+#   render_settings:
+#     nb_points: 500
+#     nb_samples_per_point: 10
+
+phase5: # render video
+  fix_world: True
+  point_size: 3.0
+  render_settings:
+    nb_points: 5
+    nb_samples_per_point: 10

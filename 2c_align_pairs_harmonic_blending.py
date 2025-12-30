@@ -70,35 +70,34 @@ def align_new_points(
     # 9. Blend depth
     new_colors = (np.array(pano_rgb_inpainted)/255.0)
 
-    # Optional upsampling to improve pcd density
-    if upsampling_factor > 1:
-        new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-        warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="nearest")
-        depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-        missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
+    # Upsampling (or resizing) to improve pcd density
+    new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
 
-        # sanity check
-        where_depth_nan_resized = np.isnan(warped_depth_interp)
-        if np.any(where_depth_nan_resized & (~missing_info_mask)):
-            print("IMPORTANT WARNING: resized depth has NaNs in ninpainted info regions!")
-            print(f"Percent of NaNs: {np.mean(where_depth_nan_resized & (~missing_info_mask))*100:.2f}%")
-            print("Expanding missing info mask to include these regions.")
-            # we want all nans in missing info mask
-            missing_info_mask = missing_info_mask | where_depth_nan_resized
-            
-        if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
-            assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
-            ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="nearest") #FLAG: Depth Resize
-            ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
-            ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
+    # sanity check
+    where_depth_nan_resized = np.isnan(warped_depth_interp)
+    if np.any(where_depth_nan_resized & (~missing_info_mask)):
+        print("WARNING: resized depth has NaNs in inpainted info regions!")
+        print(f"Percent of NaNs: {np.mean(where_depth_nan_resized & (~missing_info_mask))*100:.2f}%")
+        print("Expanding missing info mask to include these regions.")
+        # we want all nans in missing info mask
+        missing_info_mask = missing_info_mask | where_depth_nan_resized
+        
+    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
+        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
+        ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear") 
+        ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
 
-            where_ldi_depth_nan_resized = np.isnan(ldi_depth)
-            if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
-                print("IMPORTANT WARNING: resized ldi depth has NaNs in ldi regions!")
-                print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan_resized & (ldi_mask))*100:.2f}%")
-                print("Expanding ldi mask to include these regions.")
-                # we want zeros nans in ldi mask
-                ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
+        where_ldi_depth_nan_resized = np.isnan(ldi_depth)
+        if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
+            print("WARNING: resized ldi depth has NaNs in ldi regions!")
+            print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan_resized & (ldi_mask))*100:.2f}%")
+            print("Expanding ldi mask to include these regions.")
+            # we want zeros nans in ldi mask
+            ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
 
     # (Naive blending)
     # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
@@ -227,13 +226,14 @@ if __name__ == "__main__":
     if not config.load_phase2c_from:
         printc(f"=== PHASE {_phase_current} : ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING ===", color='green')
 
-        pointclouds = {}
         all_pts_world = np.array([]).reshape(0, 3)
         all_colors_world = np.array([]).reshape(0, 3)
+        all_ldi_mask_world = np.array([]).reshape(0, )
 
         for i in range(1, config.num_dreams):
-            print(f"--- {_phase_current}: Inpainting+Alignment {i:02d} / {config.num_dreams-1} ---")
+            print(f"--- {_phase_current}: Harmonic Blending {i:02d} / {config.num_dreams-1} ---")
 
+            pointcloud_zoo = {}
             save_dir__ = save_dir_ / f"align_{i:02d}"
             os.makedirs(save_dir__ / _phase_current / ".cache", exist_ok=True)
 
@@ -288,15 +288,25 @@ if __name__ == "__main__":
             new_colors=res['colors_out']
 
             if config.phase2.excessive_pcd_logging:
-                pcd_naive=res['pcd_naive']
-                pcd_harmonic=res['pcd_harmonic']
-                pointclouds[f"inpaint_{i:02d}"] = {}
-                pointclouds[f"inpaint_{i:02d}"]['blended_naive_w_excess'] = pcd_naive
-                pointclouds[f"inpaint_{i:02d}"]['blended_harmonic_w_excess'] = pcd_harmonic
-                pointclouds[f"inpaint_{i:02d}"]["blended_harmonic"] = my_utils.PointCloud(
+                pointcloud_zoo['blended_naive_w_excess'] = res['pcd_naive']
+                pointcloud_zoo['blended_harmonic_w_excess'] = res['pcd_harmonic']
+                pointcloud_zoo["blended_harmonic"] = my_utils.PointCloud(
                     pts=new_pts,
                     colors=new_colors
                 )
+
+            # (Optional) Remove outliers
+            if config.phase2.outliers_removal.apply_on_fg:
+                new_pts, new_colors = my_utils.GeometryTransforms.remove_statistical_outliers(
+                    new_pts,
+                    new_colors,
+                    **config.phase2.outliers_removal.options
+                )
+                if config.phase2.excessive_pcd_logging:
+                    pointcloud_zoo['blended_harmonic_outlier_removed'] = my_utils.PointCloud(
+                        pts=new_pts,
+                        colors=new_colors
+                    )
 
             # 10. Add new points to their corresponding spheres.
             (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
@@ -307,64 +317,104 @@ if __name__ == "__main__":
                 new_pts_ldi=res['pts_out_ldi']
                 new_colors_ldi=res['colors_out_ldi']
 
-                (new_pts_1_ldi, new_colors_1_ldi), (new_pts_2_ldi, new_colors_2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
+                if config.phase2.excessive_pcd_logging:
+                    pointcloud_zoo['blended_harmonic_ldi'] = my_utils.PointCloud(
+                        pts=new_pts_ldi,
+                        colors=new_colors_ldi
+                    )
+
+                # (Optional) Remove outliers for LDI points
+                if config.phase2.outliers_removal.apply_on_ldi:
+                    new_pts_ldi, new_colors_ldi = my_utils.GeometryTransforms.remove_statistical_outliers(
+                        new_pts_ldi,
+                        new_colors_ldi,
+                        **config.phase2.outliers_removal.options
+                    )
+
+                    if config.phase2.excessive_pcd_logging:
+                        pointcloud_zoo['blended_harmonic_ldi_outlier_removed'] = my_utils.PointCloud(
+                            pts=new_pts_ldi,
+                            colors=new_colors_ldi
+                        )
+
+                    
+
+                (new_pts1_ldi, new_colors1_ldi), (new_pts2_ldi, new_colors2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
                     new_pts_ldi, new_colors_ldi, pose1, pose2, translation_direction
                 )
+                
+                new_mask1_zeros = np.zeros(new_pts1.shape[:-1])
+                new_mask2_zeros = np.zeros(new_pts2.shape[:-1])
 
-                new_pts1           = np.concatenate((new_pts1,           new_pts_1_ldi), axis=0)
-                new_colors1        = np.concatenate((new_colors1,        new_colors_1_ldi), axis=0)
-                new_pts2           = np.concatenate((new_pts2,           new_pts_2_ldi), axis=0)
-                new_colors2        = np.concatenate((new_colors2,        new_colors_2_ldi), axis=0)
-                new_pts_neutral    = np.concatenate((new_pts_neutral,    new_pts_neutral_ldi), axis=0)
-                new_colors_neutral = np.concatenate((new_colors_neutral, new_colors_neutral_ldi), axis=0)
+                new_mask1_ones = np.ones(new_pts1_ldi.shape[:-1])
+                new_mask2_ones = np.ones(new_pts2_ldi.shape[:-1])
 
+                new_mask_neutral_zeros = np.zeros(new_pts_neutral.shape[:-1])
+                new_mask_neutral_ones = np.ones(new_pts_neutral_ldi.shape[:-1])
 
-            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1)
-            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2)
+                new_pts1           = np.concatenate((new_pts1,               new_pts1_ldi), axis=0)
+                new_colors1        = np.concatenate((new_colors1,            new_colors1_ldi), axis=0)
+                new_mask_ldi1      = np.concatenate((new_mask1_zeros,        new_mask1_ones), axis=0) 
+    
+                new_pts2           = np.concatenate((new_pts2,               new_pts2_ldi), axis=0)
+                new_colors2        = np.concatenate((new_colors2,            new_colors2_ldi), axis=0)
+                new_mask_ldi2      = np.concatenate((new_mask2_zeros,        new_mask2_ones), axis=0)
+                    
+                new_pts_neutral    = np.concatenate((new_pts_neutral,        new_pts_neutral_ldi), axis=0)
+                new_colors_neutral = np.concatenate((new_colors_neutral,     new_colors_neutral_ldi), axis=0)
+                new_mask_neutral   = np.concatenate((new_mask_neutral_zeros, new_mask_neutral_ones), axis=0)
+
+            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1)
+            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2)
 
             # Add all new points to world points, including inpainted+deformed points and points from the current dream.
             
             if config.phase2.excessive_pcd_logging:
-                pointclouds[f'dream_{i:02d}'] = {}
-                pointclouds[f"dream_{i:02d}"]['sphere1_init'] = sphere1.closed.get_world_pcd()
-                pointclouds[f"dream_{i:02d}"]['sphere2_init'] = sphere2.closed.get_world_pcd()
+                pointcloud_zoo['sphere1_init'] = sphere1.closed.get_world_pcd()
+                pointcloud_zoo['sphere2_init'] = sphere2.closed.get_world_pcd()
             
             #10.a Points from sphere1
             if i == 1: # first iteration: sphere1 only has right opened
-                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.right_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere1.right_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere1.right_opened.get_world_pcd().colors), axis=0)
+                s1_ro = sphere1.right_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = s1_ro
+                all_pts_world = np.concatenate((all_pts_world, s1_ro.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s1_ro.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_ro.ldi_mask), axis=0)
 
             else: # later iterations: sphere1 has both opened
-                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere1_open'] = sphere1.both_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere1.both_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere1.both_opened.get_world_pcd().colors), axis=0)
-
+                s1_bo = sphere1.both_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere1_open'] = s1_bo
+                all_pts_world = np.concatenate((all_pts_world, s1_bo.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s1_bo.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_bo.ldi_mask), axis=0)
             #10.b Neutral points
             all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
             all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
+            all_ldi_mask_world = np.concatenate((all_ldi_mask_world, new_mask_neutral), axis=0)
 
             #10.c Points from sphere2 (only last iter)
             if i == config.num_dreams - 1: 
-                if config.phase2.excessive_pcd_logging: pointclouds[f"dream_{i:02d}"]['sphere2_open'] = sphere2.left_opened.get_world_pcd()
-                all_pts_world = np.concatenate((all_pts_world, sphere2.left_opened.get_world_pcd().pts), axis=0)
-                all_colors_world = np.concatenate((all_colors_world, sphere2.left_opened.get_world_pcd().colors), axis=0)
+                s2_lo = sphere2.left_opened.get_world_pcd()
+                if config.phase2.excessive_pcd_logging: pointcloud_zoo['sphere2_open'] = s2_lo
+                all_pts_world = np.concatenate((all_pts_world, s2_lo.pts), axis=0)
+                all_colors_world = np.concatenate((all_colors_world, s2_lo.colors), axis=0)
+                all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s2_lo.ldi_mask), axis=0)
                 assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
 
-
             # save pcd
-            with open(save_dir_  / f"{_phase_current}_pointclouds_zoo.pkl", 'wb') as f:
-                pkl.dump(pointclouds, f)
+            with open(save_dir__  / f"{_phase_current}_pointclouds_zoo.pkl", 'wb') as f:
+                pkl.dump(pointcloud_zoo, f)
 
         # END OF PHASE 2: final pcd save
         with open(save_dir_  / f"{_phase_current}_raw_dream_pcd.pkl", 'wb') as f:
             pkl.dump(
                 my_utils.PointCloud(
                     pts=all_pts_world,
-                    colors=all_colors_world
+                    colors=all_colors_world,
+                    ldi_mask=all_ldi_mask_world,
                 ), f)
 
-        print(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!")
+        printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')
     else:
         printc(f"SKIPPING PHASE {_phase_current}: ALIGN PAIRS OF SPHERES WITH HARMONIC BLENDING", color='magenta')
         printc(f"Loading instead from {config.load_phase2c_from}", color='magenta')

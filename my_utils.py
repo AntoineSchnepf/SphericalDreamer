@@ -1,11 +1,14 @@
 import os
 import sys 
+import math
 import numpy as np
 from PIL import Image
 import copy
 import matplotlib.pyplot as plt
 from scipy import ndimage
 import copy
+import ast
+from collections.abc import Mapping, Sequence
 import cv2 
 from sklearn.neighbors import kneighbors_graph, NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
@@ -84,7 +87,8 @@ def printc(str, color=None):
             "magenta": "\033[95m",
             "cyan": "\033[96m",
             "white": "\033[97m",
-            "end": "\033[0m"
+            "end": "\033[0m",
+            "gray": "\033[90m",
         }
         print(f"{colors[color]}{str}{colors['end']}")
 
@@ -144,29 +148,205 @@ def copy_phase_folders_old(folder_start_with: str, item_start_with: str,
                     else:
                         shutil.copy2(sub, dst_item)
 
-def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
+def _parse_scalar(v: str):
+    """Best-effort parse: int/float/bool/None/list/dict/strings."""
+    v = v.strip()
+    # common bool/none
+    low = v.lower()
+    if low == "true": return True
+    if low == "false": return False
+    if low in ("none", "null"): return None
+    # numbers / literals / lists / dicts / quoted strings
+    try:
+        return ast.literal_eval(v)
+    except Exception:
+        return v  # fallback: raw string
+
+def _set_by_dotted_path(cfg: dict, path: str, value):
+    """
+    Supports:
+      phase2.something
+      phase2.list.0
+      phase2.dict.key
+    """
+    keys = path.split(".")
+    cur = cfg
+    for i, k in enumerate(keys[:-1]):
+        # list index?
+        if isinstance(cur, list) and k.isdigit():
+            idx = int(k)
+            while len(cur) <= idx:
+                cur.append({})
+            cur = cur[idx]
+            continue
+
+        # dict step
+        if not isinstance(cur, Mapping):
+            raise TypeError(f"Cannot descend into non-mapping at '{'.'.join(keys[:i])}'")
+
+        if k not in cur or cur[k] is None:
+            # if next key looks like an int, create a list, else dict
+            cur[k] = [] if keys[i+1].isdigit() else {}
+        cur = cur[k]
+
+    last = keys[-1]
+    if isinstance(cur, list) and last.isdigit():
+        idx = int(last)
+        while len(cur) <= idx:
+            cur.append(None)
+        cur[idx] = value
+    else:
+        cur[last] = value
+
+class ConfigOverrideError(KeyError):
+    pass
+
+def set_by_dotted_path_strict(cfg, path: str, value):
+    """
+    Strict override:
+    - All keys must already exist
+    - List indices must be in range
+    """
+    keys = path.split(".")
+    cur = cfg
+
+    for i, k in enumerate(keys[:-1]):
+        where = ".".join(keys[:i+1])
+
+        if isinstance(cur, Mapping):
+            if k not in cur:
+                raise ConfigOverrideError(f"Config key does not exist: '{where}'")
+            cur = cur[k]
+
+        elif isinstance(cur, Sequence) and not isinstance(cur, (str, bytes)):
+            if not k.isdigit():
+                raise ConfigOverrideError(
+                    f"Expected list index at '{where}', got '{k}'"
+                )
+            idx = int(k)
+            if idx >= len(cur):
+                raise ConfigOverrideError(
+                    f"List index out of range at '{where}' (len={len(cur)})"
+                )
+            cur = cur[idx]
+
+        else:
+            raise ConfigOverrideError(
+                f"Cannot descend into non-container at '{where}'"
+            )
+
+    # ---- set final key ----
+    last = keys[-1]
+    where = ".".join(keys)
+
+    if isinstance(cur, Mapping):
+        if last not in cur:
+            raise ConfigOverrideError(f"Config key does not exist: '{where}'")
+        cur[last] = value
+
+    elif isinstance(cur, Sequence) and not isinstance(cur, (str, bytes)):
+        if not last.isdigit():
+            raise ConfigOverrideError(
+                f"Expected list index at '{where}', got '{last}'"
+            )
+        idx = int(last)
+        if idx >= len(cur):
+            raise ConfigOverrideError(
+                f"List index out of range at '{where}' (len={len(cur)})"
+            )
+        cur[idx] = value
+
+    else:
+        raise ConfigOverrideError(
+            f"Cannot set value at non-container '{where}'"
+        )
+
+def _collect_overrides(unknown_args):
+    """
+    Turn ["--a.b", "5", "--x", "true"] into [("a.b", 5), ("x", True)]
+    Also supports "--a.b=5".
+    """
+    overrides = []
+    i = 0
+    while i < len(unknown_args):
+        token = unknown_args[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+
+        token = token[2:]
+        if "=" in token:
+            k, v = token.split("=", 1)
+            overrides.append((k, _parse_scalar(v)))
+            i += 1
+        else:
+            k = token
+            if i + 1 >= len(unknown_args) or unknown_args[i + 1].startswith("--"):
+                # flag with no value -> treat as True
+                overrides.append((k, True))
+                i += 1
+            else:
+                overrides.append((k, _parse_scalar(unknown_args[i + 1])))
+                i += 2
+    return overrides
+
+def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=False):
+    if debug_parser_override is None:
+        debug_parser_override = []
+
     repo_path = os.path.dirname(os.path.realpath(__file__))
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default="_default.yaml")
     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+
     # TODO: remove lines below
     parser.add_argument('--img_name', type=str, default='FD0')
     print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
 
-    # ---- script args ----
+    # Parse known args + keep the rest as overrides
     if debug:
         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
         printc(debug_message, color="red")
-        args = parser.parse_args(debug_parser_override)
+        args, unknown = parser.parse_known_args(debug_parser_override)
     else:
-        args = parser.parse_args()
+        args, unknown = parser.parse_known_args()
 
-    config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
-    
+    config = Prodict.from_dict(
+        load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml")
+    )
+
+    # Apply overrides
+    for k, v in _collect_overrides(unknown):
+        set_by_dotted_path_strict(config, k, v)
+
     if return_img_name:
         return config, args.img_name
-    
     return config
+
+# Note: This is the old fetch_config_via_parser without override functionality
+# def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
+#     repo_path = os.path.dirname(os.path.realpath(__file__))
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--config', type=str, default="_default.yaml")
+#     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
+#     # TODO: remove lines below
+#     parser.add_argument('--img_name', type=str, default='FD0')
+#     print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
+
+#     # ---- script args ----
+#     if debug:
+#         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
+#         printc(debug_message, color="red")
+#         args = parser.parse_args(debug_parser_override)
+#     else:
+#         args = parser.parse_args()
+
+#     config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
+    
+#     if return_img_name:
+#         return config, args.img_name
+    
+#     return config
 
 def setup(config):
     seeds = [config.seed + offset for offset in config.seed_offsets]
@@ -1040,13 +1220,14 @@ def load_rgbd_ldi_pano(dream, save_dir_, phase):
     return colors_bg, depth_bg, mask_bg
 
 class PointCloud:
-    def __init__(self, pts, colors):
+    def __init__(self, pts, colors, ldi_mask=None):
         """
         pts: np.array of shape [..., 3]
         colors: np.array of shape [..., 3] with values in [0-1]
         """
-        self.pts = pts.reshape(-1, 3)
-        self.colors = colors.reshape(-1, 3)
+        self.pts = pts.reshape(-1, 3).astype(np.float32)
+        self.colors = colors.reshape(-1, 3).astype(np.float32)
+        self.ldi_mask = ldi_mask.reshape(-1).astype(bool) if ldi_mask is not None else None
         assert self.pts.shape[0] == self.colors.shape[0], "Error: pts and colors must have the same number of points"
 
     def get_o3d_pointcloud(self):
@@ -1057,10 +1238,11 @@ class PointCloud:
         return pcd
 
 class SphereState:
-    def __init__(self, pts_carte, colors, pose):
+    def __init__(self, pts_carte, colors, pose, ldi_mask=None):
         """everything in spherical coordinates"""
         self.pts = pts_carte
         self.colors = colors
+        self.ldi_mask = ldi_mask
         self.pose = pose
         self.is_world_pcd_init=False
     
@@ -1070,7 +1252,8 @@ class SphereState:
 
         self.world_pcd = PointCloud(
             pts=cam_carte2world_3D(self.pts, self.pose),
-            colors=self.colors
+            colors=self.colors,
+            ldi_mask=self.ldi_mask
         )
         self.is_world_pcd_init=True
 
@@ -1094,7 +1277,7 @@ _default_opening_kwargs = {
 
 class Sphere:
 
-    def __init__(self, pose, pts_carte, colors, forward_sph=None, forward_carte=None, opening_kwargs=_default_opening_kwargs):
+    def __init__(self, pose, pts_carte, colors, ldi_mask=None,forward_sph=None, forward_carte=None, opening_kwargs=_default_opening_kwargs):
         """
         Can be derived in four different ways: open left, open right, open both, open none
         Input points are expected not to be opened ye.
@@ -1109,7 +1292,7 @@ class Sphere:
         self.opening_kwargs = opening_kwargs
         self.pose = pose
 
-        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+        self.pts_carte, self.colors, self.ldi_mask = self.filter_nan(pts_carte, colors, ldi_mask)
 
         self.is_closed_init = False
         self.is_both_opened_init = False
@@ -1117,46 +1300,48 @@ class Sphere:
         self.is_right_opened_init = False
 
     @staticmethod
-    def filter_nan(pts_carte, colors):
+    def filter_nan(pts_carte, colors, ldi_mask=None):
         mask_finite = np.isfinite(pts_carte).all(axis=-1) & np.isfinite(colors).all(axis=-1)
         pts_carte = pts_carte[mask_finite]
         colors = colors[mask_finite]
-        return pts_carte, colors
+        if ldi_mask is not None:
+            ldi_mask = ldi_mask[mask_finite]
+        return pts_carte, colors, ldi_mask
     
     @property
     def closed(self):
         if not self.is_closed_init:
-            self._closed = self._close(self.pts_carte, self.colors)
+            self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask)
             self.is_closed_init = True
         return self._closed
 
     @property
     def both_opened(self):
         if not self.is_both_opened_init:
-            self._both_opened = self._open_both(self.pts_carte, self.colors)
+            self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask)
             self.is_both_opened_init = True
         return self._both_opened
     
     @property
     def left_opened(self):
         if not self.is_left_opened_init:
-            self._left_opened = self._open_left(self.pts_carte, self.colors)
+            self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask)
             self.is_left_opened_init = True
         return self._left_opened
 
     @property
     def right_opened(self):
         if not self.is_right_opened_init:
-            self._right_opened = self._open_right(self.pts_carte, self.colors)
+            self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask)
             self.is_right_opened_init = True
         return self._right_opened
     
     def init_all_states(self):
         # compute all openings
-        self._closed = self._close(self.pts_carte, self.colors)
-        self._both_opened = self._open_both(self.pts_carte, self.colors)
-        self._left_opened = self._open_left(self.pts_carte, self.colors)
-        self._right_opened = self._open_right(self.pts_carte, self.colors)
+        self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask)
+        self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask)
+        self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask)
+        self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask)
 
     def get_state(self, open_left, open_right):
         if open_left and open_right:
@@ -1168,15 +1353,16 @@ class Sphere:
         else:
             return self.closed
     
-    def _close(self, pts_carte, colors):
+    def _close(self, pts_carte, colors, ldi_mask):
         sphere_closed = SphereState(
             pts_carte=pts_carte, 
             colors=colors,
-            pose=self.pose
+            pose=self.pose,
+            ldi_mask=ldi_mask
         )
         return sphere_closed
     
-    def _open_left(self, pts_carte, colors):
+    def _open_left(self, pts_carte, colors, ldi_mask):
         _, open_pts_carte, mask_opening = open_world_carte(
             forward_carte=-self.forward_carte,
             pts_carte=pts_carte,
@@ -1185,11 +1371,12 @@ class Sphere:
         sphere_opened_left = SphereState(
             pts_carte=open_pts_carte[mask_opening], 
             colors=colors[mask_opening],
-            pose=self.pose
+            pose=self.pose,
+            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None
         )
         return sphere_opened_left
 
-    def _open_right(self, pts_carte, colors):
+    def _open_right(self, pts_carte, colors, ldi_mask):
         _, open_pts_carte, mask_opening = open_world_carte(
             forward_carte=self.forward_carte,
             pts_carte=pts_carte,
@@ -1198,11 +1385,12 @@ class Sphere:
         sphere_opened_right = SphereState(
             pts_carte=open_pts_carte[mask_opening], 
             colors=colors[mask_opening],
-            pose=self.pose
+            pose=self.pose,
+            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None
         )
         return sphere_opened_right
 
-    def _open_both(self, pts_carte, colors):
+    def _open_both(self, pts_carte, colors, ldi_mask):
         _, open_pts_carte, mask_opening1 = open_world_carte(
             forward_carte=self.forward_carte,
             pts_carte=pts_carte,
@@ -1210,6 +1398,7 @@ class Sphere:
         )
         open_pts_carte = open_pts_carte[mask_opening1]
         colors = colors[mask_opening1]
+        ldi_mask = ldi_mask[mask_opening1] if ldi_mask is not None else None
 
         _, open_pts_carte, mask_opening2 = open_world_carte(
             forward_carte=-self.forward_carte,
@@ -1218,19 +1407,27 @@ class Sphere:
         )
         open_pts_carte = open_pts_carte[mask_opening2]
         colors = colors[mask_opening2]
+        ldi_mask = ldi_mask[mask_opening2] if ldi_mask is not None else None
         sphere_opened_both = SphereState(
             pts_carte=open_pts_carte, 
             colors=colors,
-            pose=self.pose
+            pose=self.pose,
+            ldi_mask=ldi_mask
         )
 
         return sphere_opened_both
 
-    def add_new_points(self, new_pts_carte, new_colors):
+    def add_new_points(self, new_pts_carte, new_colors, new_ldi_mask=None):
         pts_carte = np.concatenate((self.pts_carte, new_pts_carte.reshape(-1, 3)), axis=0)
         colors = np.concatenate((self.colors, new_colors.reshape(-1, 3)), axis=0)
+        if new_ldi_mask is not None:
+            assert self.ldi_mask is not None
+            ldi_mask = np.concatenate((self.ldi_mask, new_ldi_mask.reshape(-1)), axis=0)
+        else:
+            assert self.ldi_mask is None
+            ldi_mask = self.ldi_mask
 
-        self.pts_carte, self.colors = self.filter_nan(pts_carte, colors)
+        self.pts_carte, self.colors, self.ldi_mask = self.filter_nan(pts_carte, colors, ldi_mask)
 
         self.is_closed_init = False
         self.is_both_opened_init = False
@@ -1254,6 +1451,7 @@ class Sphere:
             "opening_kwargs": self.opening_kwargs,
             "pts_carte": self.pts_carte,
             "colors": self.colors,
+            "ldi_mask": self.ldi_mask,
         }
 
         # Ensure directory exists
@@ -1274,6 +1472,7 @@ class Sphere:
         pose = data["pose"]
         pts_carte = data["pts_carte"]
         colors = data["colors"]
+        ldi_mask = data["ldi_mask"]
         forward_sph = data.get("forward_sph", None)
         forward_carte = data.get("forward_carte", None)
         opening_kwargs = data.get("opening_kwargs", _default_opening_kwargs)
@@ -1282,6 +1481,7 @@ class Sphere:
             pose=pose,
             pts_carte=pts_carte,
             colors=colors,
+            ldi_mask=ldi_mask,
             forward_sph=forward_sph,
             forward_carte=forward_carte,
             opening_kwargs=opening_kwargs,
@@ -1663,102 +1863,7 @@ class GeometryTransforms:
         # Optional: set invalid/zero inputs to NaN
         Z[~np.isfinite(D)] = np.nan
         return Z
-
-    @staticmethod
-    def _l2_errors(x, y):
-        "norm over last axis"
-        return np.sqrt((x - y)**2)
-
-    @staticmethod
-    def _l1_errors(x, y):
-        "norm over last axis"
-        return np.abs(x - y)
-
-    @staticmethod
-    def correct_floor_old(P, depth_map_eqr, error_type='l1', plot=False):
-        """
-        Correct points using trigonometry and an heuristic to make the floor flat
-        The next version is better. Keeping this one just for reference.
-        """
-        thetas = get_canonical_sph_pixels(height, width)[..., 0]
-        avg_depth_vertical = np.nanmean(depth_map_eqr, axis=1)  # [H, ]
-        r_horizon_theta_range=(
-            np.deg2rad(-10), np.deg2rad(-1) 
-        )
-        r_horizon_band_mask = (thetas[:,0] >= r_horizon_theta_range[0]) & (thetas[:,0] <= r_horizon_theta_range[1])
-        r_horizon = np.nanmean(avg_depth_vertical[r_horizon_band_mask])  # scalar
-
-        if error_type=='l2':
-            strength = GeometryTransforms._l2_errors(depth_map_eqr, r_horizon)
-        elif error_type=='l1':
-            strength = GeometryTransforms._l1_errors(depth_map_eqr, r_horizon)
-        else:
-            raise ValueError(f"Unknown error type: {error_type}. Choose from 'l1' or 'l2'.")
-        
-        strength = (strength - np.min(strength)) / (np.max(strength) - np.min(strength) + 1e-8)
-        strength[thetas >= 0] = 0.0
-
-        correction_raw =  (avg_depth_vertical[:, None] * np.cos(thetas + np.pi/2))[..., None] * np.array([0, 0, 1])
-        correction = strength[..., None] * correction_raw
-        corrected_pts = P + correction
-
-        if plot:
-            fig, axes = plt.subplots(3,2, figsize=(8,16))
-
-            axes[0,0].set_title("Depth")
-            axes[0,0].imshow(depth_map_eqr)
-            fig.colorbar(axes[0,0].imshow(depth_map_eqr), ax=axes[0,0])
-
-            axes[0,1].set_title("Depth Correction")
-            axes[0,1].imshow(correction[..., 2])
-            fig.colorbar(axes[0,1].imshow(correction[..., 2]), ax=axes[0,1])
-            
-            axes[1,0].set_title("Correction Raw")
-            axes[1,0].imshow(correction_raw)
-            fig.colorbar(axes[1,0].imshow(correction_raw[..., 2]), ax=axes[1,0])
-
-
-            axes[1,1].set_title("Correction Strength")
-            axes[1,1].imshow(strength)
-            fig.colorbar(axes[1,1].imshow(strength), ax=axes[1,1])
-
-            axes[2,0].set_title("Depth and Correction Profile")
-            correction_profile = np.nanmean(correction[..., 2], axis=1)
-            axes[2,0].plot(thetas[:,0], correction_profile, label="Average depth correction")
-            theta_band = np.nanmean(thetas, axis=1)
-            avg_depth_vertical = np.nanmean(depth_map_eqr, axis=1)
-            axes[2,0].plot(theta_band, avg_depth_vertical, label="average depth (before)")
-            axes[2,0].legend()
-            axes[2,0].set_xlabel("Elevation (radians)")
-            axes[2,0].set_ylabel("Average Depth")
-
-            axes[2,1].set_title("Z value Profiles before/after correction")
-            z_before = P[..., 2].mean(axis=1)
-            axes[2,1].plot(theta_band, z_before, label="Before correction")
-            axes[2,1].set_xlabel("Elevation (radians)")
-            axes[2,1].set_ylabel("Average Z value")
-
-            z_after = corrected_pts[..., 2].mean(axis=1)
-            axes[2,1].plot(theta_band, z_after, label="After correction")
-            axes[2,1].legend()
-            plt.tight_layout()
-            plt.show()
-
-            # show z axis 
-            fig, axes = plt.subplots(2,1)
-            fig.suptitle("Z values before/after correction")
-            axes[0].set_title("Before Correction")
-            im0 = axes[0].imshow(P[..., 2], vmin=-1, vmax=1)
-            fig.colorbar(im0, ax=axes[0])
-            axes[1].set_title("After Correction")
-            im1 = axes[1].imshow(corrected_pts[..., 2], vmin=-1, vmax=1)
-            fig.colorbar(im1, ax=axes[1])
-            plt.tight_layout()
-            plt.show()
-
-
-        return corrected_pts, correction, correction_raw, strength
-
+    
     @staticmethod
     def build_floor_correction(
         X, Y, Z, theta,
@@ -2049,7 +2154,7 @@ class GeometryTransforms:
 
     @staticmethod
     def correct_floor_v3(
-        pts_carte, theta, colors, correct_until_depth_metric,
+        pts_carte, ldi_mask, theta, colors, correct_until_depth_metric,
         *,
         dx=0.1, dy=0.1, q=10.0,
         theta_min=-np.pi, theta_max=0.0,
@@ -2079,11 +2184,13 @@ class GeometryTransforms:
         -------
         X, Y, Z_corrected : ndarrays
         """
-
+        ldi_mask = np.asarray(ldi_mask, dtype=bool)
         X, Y, Z = pts_carte[..., 0], pts_carte[..., 1], pts_carte[..., 2]
+        X_4corr, Y_4corr, Z_4corr = X[~ldi_mask], Y[~ldi_mask], Z[~ldi_mask]
+        theta_4corr = theta[~ldi_mask]
 
         C_func, (xc, yc), Zfloor = GeometryTransforms.build_floor_correction(
-            X, Y, Z, theta,
+            X_4corr, Y_4corr, Z_4corr, theta_4corr,
             correct_until_depth_metric=correct_until_depth_metric,
             dx=dx, dy=dy, q=q,
             theta_min=theta_min, theta_max=theta_max,
@@ -2094,7 +2201,7 @@ class GeometryTransforms:
             plot_horizon=plot,
             plot_floor_profile=plot,
             horizon_deg=horizon_deg,
-            horizon_colors=colors,
+            horizon_colors=colors[~ldi_mask],
         )
 
         C_all = C_func(X, Y)
@@ -2276,7 +2383,7 @@ class GeometryTransforms:
         return pts_prime
 
     @staticmethod
-    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8):
+    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8, verbose=False):
         """
         Remove statistical outliers from a point cloud using Open3D's 
         statistical outlier removal (SOR) filter.
@@ -2320,10 +2427,16 @@ class GeometryTransforms:
         - Only inliers are returned; outliers are discarded.
         """
         import open3d as o3d
+        size_before = pts.size // 3
+        t0 = time.time()
         pcd = PointCloud(pts, colors).get_o3d_pointcloud()
         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
         inlier_pts = np.asarray(cl.points)
         inlier_colors = np.asarray(cl.colors)
+        if verbose:
+            size_after = inlier_pts.size // 3
+            print(f"Removed {100 * (size_before - size_after) / size_before:.2f}% outliers in point cloud in {time.time() - t0:.2f} seconds.")
+
         return inlier_pts, inlier_colors
 
     @staticmethod
@@ -2406,13 +2519,10 @@ class GeometryTransforms:
 
         return pts_cam_cartesian, colors
 
-_default_outlier_removal_options = {
-    'nb_neighbors': 20,
-    'std_ratio': 1.8,
-}
 def run_corrective_pipeline_on_sphere(
         pts, # in cartesian coordinates (local camera frame)
         colors, 
+        ldi_mask,
         height, width, 
         correct_depth, 
         near, 
@@ -2421,8 +2531,6 @@ def run_corrective_pipeline_on_sphere(
         correct_floor, 
         depth_threshold_for_floor_correction, 
         remove_sky=False, 
-        remove_outliers=True, 
-        outlier_removal_options=_default_outlier_removal_options,
         verbose=False,
         plot=False,
     ):
@@ -2496,13 +2604,15 @@ def run_corrective_pipeline_on_sphere(
         sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
         final_pts = final_pts[~sky_mask] 
         colors = colors[~sky_mask]
+        ldi_mask = ldi_mask[~sky_mask]
         #TODO: plot a figure showing the sky mask as an overlay over the image.
 
         if verbose:
             print("d. (Optional) Sky Removed.")
 
     # 7. Remove statistical outliers
-    if remove_outliers: 
+    if False: 
+        # depreciated: use the options passed from outside
         n_before = len(final_pts.reshape(-1,3))
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,
@@ -2514,11 +2624,12 @@ def run_corrective_pipeline_on_sphere(
         if verbose:
             print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
     
-    return final_pts, colors
+    return final_pts, colors, ldi_mask
 
 def run_corrective_pipeline_on_world(
     pts, 
     colors,
+    ldi_mask,
     pose_left,
     pose_right,
     translation_direction,
@@ -2528,8 +2639,6 @@ def run_corrective_pipeline_on_world(
     correct_walls, 
     correct_floor, 
     depth_threshold_for_floor_correction, 
-    remove_outliers,
-    outlier_removal_options=_default_outlier_removal_options,
     verbose=False,
     plot=False,
 ):
@@ -2628,8 +2737,6 @@ def run_corrective_pipeline_on_world(
         final_pts[~mask_keep_right] = pts_right
 
 
-    
-
     # 5. Correct Floor
     if correct_floor:
         if correct_depth:
@@ -2647,6 +2754,7 @@ def run_corrective_pipeline_on_world(
         theta = carte2sph_3D(final_pts)[..., 0]
         final_pts = GeometryTransforms.correct_floor_v3(
             pts_carte=final_pts,
+            ldi_mask=ldi_mask,
             theta=theta,
             colors=colors,
             correct_until_depth_metric=correct_until_depth_metric,
@@ -2657,7 +2765,8 @@ def run_corrective_pipeline_on_world(
             print("b. Cylindrical Floor Corrected.")
 
     # 7. Remove statistical outliers
-    if remove_outliers: 
+    if False: 
+        # depreciated
         n_before = len(final_pts.reshape(-1,3))
         final_pts, colors = GeometryTransforms.remove_statistical_outliers(
             pts=final_pts,
@@ -2669,11 +2778,79 @@ def run_corrective_pipeline_on_world(
         if verbose:
             print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
 
-    return final_pts, colors
+    return final_pts, colors, ldi_mask
     
 # ----------------------------- #
 # ----- Utility functions ----- #
 # ----------------------------- #
+
+def concat_with_meta(*arrays):
+    """
+    Concatenate arrays along axis=0 and return:
+      - concatenated array
+      - meta information enabling reconstruction of original arrays
+    
+    Parameters
+    ----------
+    *arrays : list of np.ndarray
+        Arrays compatible for concatenation along axis 0.
+
+    Returns
+    -------
+    concatenated : np.ndarray
+    meta : dict storing reconstruction info
+    """
+    # Validate input
+    if len(arrays) == 0:
+        raise ValueError("At least one array must be provided.")
+
+    # Record first-dimension sizes for later splitting
+    lengths = [arr.shape[0] for arr in arrays]
+
+    # Perform concatenation
+    concatenated = np.concatenate(arrays, axis=0)
+
+    # Meta info: lengths + total number of arrays
+    meta = {
+        "lengths": lengths,
+        "n_arrays": len(arrays)
+    }
+
+    return concatenated, meta
+
+def undo_concat(concatenated, meta):
+    """
+    Undo a concatenation operation performed by concat_with_meta.
+    
+    Parameters
+    ----------
+    concatenated : np.ndarray
+        The concatenated output array.
+    meta : dict
+        Must contain:
+          - "lengths": list of sizes along axis 0 for original arrays
+          - "n_arrays": number of arrays originally concatenated
+
+    Returns
+    -------
+    arrays : list of np.ndarray
+        The original arrays recovered.
+    """
+    lengths = meta["lengths"]
+    n_arrays = meta["n_arrays"]
+
+    # Ensure the metadata matches
+    if len(lengths) != n_arrays:
+        raise ValueError("Mismatch between number of arrays and lengths metadata.")
+
+    arrays = []
+    start = 0
+    for L in lengths:
+        end = start + L
+        arrays.append(concatenated[start:end])
+        start = end
+
+    return arrays
 
 def get_norm_vector(v):
     """Normalize a vector or an array of vectors."""
@@ -4495,6 +4672,90 @@ def interpolate_camera_keypoints(camera_keypoints, fpm, fpd_e, fpd_a, max_x):
 
         all_cameras.extend(stretch_append(all_x, all_y, all_z, all_elevs, all_azims))
     return all_cameras
+
+def sample_cameras(min_x, max_x, min_y, max_y, min_z, max_z, nb_points, nb_samples_per_point, seed):
+    # Sample points in 3D space
+    rng = np.random.default_rng(seed=seed)
+    points = rng.random((nb_points, 3))
+    points = np.random.rand(nb_points, 3)
+    points[:, 0] = min_x + (max_x - min_x) * points[:, 0]
+    points[:, 1] = min_y + (max_y - min_y) * points[:, 1]
+    points[:, 2] = min_z + (max_z - min_z) * points[:, 2]
+
+    # Sample additional cameras around each point
+    all_cameras = []
+    for point in points:
+        for _ in range(nb_samples_per_point):
+            # Add a random elevation and azimuth angle
+            elev_deg = np.random.uniform(-90, 90)
+            azim_deg = np.random.uniform(0, 360)
+
+            all_cameras.append((point[0], point[1], point[2], elev_deg, azim_deg))
+
+    return all_cameras
+
+
+def get_nerfstudio_frame(
+    cam_pos, elev_deg, azim_deg, width, height, fov_deg, file_path=""
+):
+    """
+    Matches the Open3D camera construction in your set_camera_from_elev_azim().
+    - World Z up
+    - azim around Z: 0 -> +X, 90 -> +Y
+    - elev above XY plane
+    - fov_deg is VERTICAL FOV (because you set FovType.Vertical)
+    Returns a Nerfstudio 'frame' dict (c2w transform_matrix + intrinsics).
+    """
+    cam_pos = np.asarray(cam_pos, dtype=np.float64).reshape(3)
+
+    elev = np.deg2rad(elev_deg)
+    azim = np.deg2rad(azim_deg)
+
+    forward = np.array([
+        np.cos(elev) * np.cos(azim),
+        np.cos(elev) * np.sin(azim),
+        np.sin(elev),
+    ], dtype=np.float64)
+    forward /= (np.linalg.norm(forward) + 1e-12)
+
+    world_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    if abs(np.dot(forward, world_up)) > 0.99:
+        world_up = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+
+    # Same basis as your Open3D code
+    right = np.cross(forward, world_up)
+    right /= (np.linalg.norm(right) + 1e-12)
+
+    up = np.cross(right, forward)
+    up /= (np.linalg.norm(up) + 1e-12)
+
+    # Nerfstudio convention: columns are [right, up, back], where back = +Z_cam in world
+    back = -forward
+
+    c2w = np.eye(4, dtype=np.float64)
+    c2w[:3, 0] = right
+    c2w[:3, 1] = up
+    c2w[:3, 2] = back
+    c2w[:3, 3] = cam_pos
+
+    # Intrinsics from VERTICAL FOV
+    fov = np.deg2rad(fov_deg)
+    fl_y = 0.5 * height / np.tan(0.5 * fov)
+    fl_x = fl_y * (width / height)  # aspect correction for vertical-FOV definition
+
+    cx = width * 0.5
+    cy = height * 0.5
+
+    return {
+        "file_path": file_path,
+        "transform_matrix": c2w.tolist(),
+        "fl_x": float(fl_x),
+        "fl_y": float(fl_y),
+        "cx": float(cx),
+        "cy": float(cy),
+        "w": int(width),
+        "h": int(height),
+    }
 
 # ----- TESTS -----
 if __name__ == "__main__":

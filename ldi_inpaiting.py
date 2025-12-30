@@ -633,9 +633,32 @@ def sobel_edges_from_depth(depth, mask=None, ksize=3):
     return edges_uint8
 
 def canny_edges_from_depth(depth, mask=None, low=50, high=150):
-    edges_mag = sobel_edges_from_depth(depth, mask=mask)
-    edges_canny = cv2.Canny(edges_mag, low, high)
+
+    depth_proc = depth.copy().astype(np.float32)
+
+    # Apply mask if provided
+    if mask is not None:
+        depth_proc[~mask] = np.nan
+
+    # Replace NaNs with median of valid depth
+    valid = np.isfinite(depth_proc)
+    if not np.any(valid):
+        raise ValueError("No valid depth values for edge detection.")
+    median_val = np.median(depth_proc[valid])
+    depth_proc[~valid] = median_val
+
+    # Normalize depth to [0, 255] for Sobel (optional but helps)
+    dmin, dmax = depth_proc.min(), depth_proc.max()
+    if dmax > dmin:
+        depth_norm = (depth_proc - dmin) / (dmax - dmin)
+    else:
+        depth_norm = np.zeros_like(depth_proc)
+    depth_8u = (depth_norm * 255.0).astype(np.uint8)
+
+    edges_canny = cv2.Canny(depth_8u, low, high)
+
     return edges_canny
+
 
 depth_sharpen_default_config = {
         "filter_size": 5,          # or [5, 5, 5] for multiple iterations
@@ -699,7 +722,7 @@ def visualize_canny_sobel_edges(image, depth_origin, depth, depth_sharpened, edg
 
     # Canny edges (optional)
     ax[5].imshow(edges_canny, cmap="gray")
-    ax[5].set_title("Canny edges (on Sobel magnitude)")
+    ax[5].set_title("Canny edges")
     ax[5].axis("off")
 
     # Empty / reserved
@@ -1104,8 +1127,8 @@ def visualize_sam_masks(
 def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_results=False, save_path=None):
 
     # Step1: Edge detection from depth map
-    if config.phase_ldi.masking.edges_detection.remove_depth_low_freq.apply:
-        depth, low_freq = remove_low_freq(depth_origin, config=config.phase_ldi.masking.edges_detection.remove_depth_low_freq)
+    if config.ldi.masking.edges_detection.remove_depth_low_freq.apply:
+        depth, low_freq = remove_low_freq(depth_origin, config=config.ldi.masking.edges_detection.remove_depth_low_freq)
         if plot_results:
             visualize_low_freq_removal(depth_origin, low_freq, depth, save_path=save_path/"01_depth_lowfreq_removal.png")
         depth = minmax_norm(depth, out_min=0.1, out_max=1.0)
@@ -1114,10 +1137,10 @@ def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_resul
 
     edges_canny, edges_sobel, depth_sharpened = get_canny_sobel_edges(
         depth, img, 
-        edged_sobel_ksize=config.phase_ldi.masking.edges_detection.sobel.ksize,
-        canny_low_t=config.phase_ldi.masking.edges_detection.canny.low_t, 
-        canny_high_t=config.phase_ldi.masking.edges_detection.canny.high_t, 
-        depth_sharpen_config=config.phase_ldi.masking.edges_detection.depth_sharpening
+        edged_sobel_ksize=config.ldi.masking.edges_detection.sobel.ksize,
+        canny_low_t=config.ldi.masking.edges_detection.canny.low_t, 
+        canny_high_t=config.ldi.masking.edges_detection.canny.high_t, 
+        depth_sharpen_config=config.ldi.masking.edges_detection.depth_sharpening
     )
     if plot_results:
         visualize_canny_sobel_edges(img, depth_origin, depth, depth_sharpened, edges_sobel, edges_canny, save_path=save_path/"02_canny_sobel_edges.png")
@@ -1139,9 +1162,9 @@ def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_resul
             seg,
             depth_sharpened,   # or depth, depending on what you prefer
             edges_canny,
-            max_edge_dist=config.phase_ldi.masking.segmask_scoring.max_edge_dist,   # allow boundary within 1px of edges
-            step_along_normal=config.phase_ldi.masking.segmask_scoring.step_along_normal,
-            min_pairs=config.phase_ldi.masking.segmask_scoring.min_pairs
+            max_edge_dist=config.ldi.masking.segmask_scoring.max_edge_dist,   # allow boundary within 1px of edges
+            step_along_normal=config.ldi.masking.segmask_scoring.step_along_normal,
+            min_pairs=config.ldi.masking.segmask_scoring.min_pairs
         )
         if s is not None:
             candidates.append((s['score'], m, s))
@@ -1151,9 +1174,9 @@ def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_resul
         top_masks = [m for _, m, _ in candidates[:50]]
         visualize_sam_masks(img, top_masks, alpha=0.8, suptitle="Top 50 SAM Masks by Edge-Alignment Score")
 
-    selected_masks = [candidates[m][1]['segmentation'] for m in range(len(candidates)) if candidates[m][0] > config.phase_ldi.masking.segmask_scoring.score_threshold]
+    selected_masks = [candidates[m][1]['segmentation'] for m in range(len(candidates)) if candidates[m][0] > config.ldi.masking.segmask_scoring.score_threshold]
     final_mask = np.any(np.stack(selected_masks, axis=-1), axis=-1)
-    # print(f"Selected {len(selected_masks)} masks out of {len(candidates)} candidates with edge-alignment score > {config.phase_ldi.masking.segmask_scoring.score_threshold}")
+    # print(f"Selected {len(selected_masks)} masks out of {len(candidates)} candidates with edge-alignment score > {config.ldi.masking.segmask_scoring.score_threshold}")
     if plot_results:
         visualize_sam_masks(img, [{"segmentation": final_mask}], alpha=0.8, max_masks=1, suptitle="Final Selected Mask after Edge-Alignment Filtering", save_path=save_path/"04_final_selected_mask.png")
 
@@ -1197,7 +1220,7 @@ def viz_lama_flux_double_inpainting(
     config,
     save_path=None,
 ):
-    aspect = config.phase_ldi.inpainting.flux_inpainting_resolution.width / config.phase_ldi.inpainting.flux_inpainting_resolution.height 
+    aspect = config.ldi.inpainting.flux_inpainting_resolution.width / config.ldi.inpainting.flux_inpainting_resolution.height 
     n_rows, n_cols = 3, 2
     s = 4  # scale factor, adjust as needed
     alpha=0.2
@@ -1209,7 +1232,7 @@ def viz_lama_flux_double_inpainting(
     axes = axes.flatten()
         
     # MAIN TITLE
-    fig.suptitle(f"Inpainting Results. \n strength={config.phase_ldi.inpainting.strength}\n Prompt (truncated)='{prompt[:50]} ...'", fontsize=20, y=1.00)
+    fig.suptitle(f"Inpainting Results. \n strength={config.ldi.inpainting.strength}\n Prompt (truncated)='{prompt[:50]} ...'", fontsize=20, y=1.00)
 
     # Row 0: original image
     axes[0].imshow(img)
@@ -1232,7 +1255,7 @@ def viz_lama_flux_double_inpainting(
     axes[4].imshow(my_utils.PIL_to_numpy(pano_flux_pil))
     axes[4].set_title(f"Inpainted Image [FLUX]")
     axes[4].axis("off")
-    axes[5].imshow(my_utils.overlay_mask(my_utils.PIL_to_numpy(pano_flux_pil), my_utils.mask_resize(mask_smooth, config.phase_ldi.inpainting.flux_inpainting_resolution.height, config.phase_ldi.inpainting.flux_inpainting_resolution.width), alpha=alpha))
+    axes[5].imshow(my_utils.overlay_mask(my_utils.PIL_to_numpy(pano_flux_pil), my_utils.mask_resize(mask_smooth, config.ldi.inpainting.flux_inpainting_resolution.height, config.ldi.inpainting.flux_inpainting_resolution.width), alpha=alpha))
     axes[5].set_title(f"Inpainted Image [FLUX] (with mask overlay)")
     axes[5].axis("off")
 
@@ -1254,8 +1277,8 @@ def lama_flux_double_inpainting_p1(
 ):
 
     # step 1: lama inpainting on a reduced resolution
-    mask_smooth = get_smooth_mask(np.asarray(mask), ksize = config.phase_ldi.inpainting.mask_dilatation_px)
-    lama_inpainting_resolution = config.phase_ldi.inpainting.lama_inpainting_resolution
+    mask_smooth = get_smooth_mask(np.asarray(mask), ksize = config.ldi.inpainting.mask_dilatation_px)
+    lama_inpainting_resolution = config.ldi.inpainting.lama_inpainting_resolution
     inpaint_pano_lama = spherical_dreamer.lama_inpaint(
         image=my_utils.numpy_to_PIL(my_utils.opencv_resize(image, lama_inpainting_resolution.height, lama_inpainting_resolution.width, )),
         mask= my_utils.numpy_bool_to_pil_mask(my_utils.mask_resize(mask_smooth, lama_inpainting_resolution.height, lama_inpainting_resolution.width)),
@@ -1295,9 +1318,9 @@ def lama_flux_double_inpainting_p2(
         prompt=prompt,
         pano_rgb=inpaint_pano_lama_pil,  
         mask=mask_smooth_pil, 
-        strength= config.phase_ldi.inpainting.strength,
-        height=config.phase_ldi.inpainting.flux_inpainting_resolution.height,
-        width=config.phase_ldi.inpainting.flux_inpainting_resolution.width,
+        strength= config.ldi.inpainting.strength,
+        height=config.ldi.inpainting.flux_inpainting_resolution.height,
+        width=config.ldi.inpainting.flux_inpainting_resolution.width,
     )
 
     if plot_results:
@@ -1909,20 +1932,20 @@ def post_process_inpainted_depth(
     return depth_bg_corrected
 
 def prepare_inpainting(config, img, depth_origin, inpaint_mask_pil):
-    he = config.phase_ldi.inpainting.flux_inpainting_resolution.height
-    wi = config.phase_ldi.inpainting.flux_inpainting_resolution.width
-    img_pil = my_utils.numpy_to_PIL(my_utils.opencv_resize(img, he, wi))
-    depth_origin = my_utils.opencv_resize(depth_origin, he, wi) # FLAG: depth resize
+    he = config.ldi.inpainting.flux_inpainting_resolution.height
+    wi = config.ldi.inpainting.flux_inpainting_resolution.width
+    img_pil = my_utils.numpy_to_PIL(my_utils.opencv_resize(img, he, wi, mode="bilinear"))
+    depth_origin = my_utils.opencv_resize(depth_origin, he, wi, mode="bilinear") # FLAG: depth resize
     inpaint_mask_pil_ = inpaint_mask_pil.resize((wi, he), resample=Image.NEAREST)
     inpaint_mask_bool_ = my_utils.pil_mask_to_numpy_bool(inpaint_mask_pil_)
 
-    if config.phase_ldi.depth_inpainting.additionnal_mask_dilation_px > 0:
+    if config.ldi.depth_inpainting.additionnal_mask_dilation_px > 0:
         inpaint_mask_bool_ = my_utils.dilate_mask(
             inpaint_mask_bool_,
-            pixels=config.phase_ldi.depth_inpainting.additionnal_mask_dilation_px
+            pixels=config.ldi.depth_inpainting.additionnal_mask_dilation_px
         )
 
-    if config.phase_ldi.depth_inpainting.fill_holes:
+    if config.ldi.depth_inpainting.fill_holes:
         inpaint_mask_bool_ = my_utils.fill_mask(inpaint_mask_bool_)
 
     inpaint_mask_pil_ = my_utils.numpy_bool_to_pil_mask(inpaint_mask_bool_)
@@ -1936,7 +1959,7 @@ def instanciate_sam(config):
     sam = sam_model_registry["vit_h"](checkpoint="checkpoints/sam_vit_h_4b8939.pth").to(device='cuda')
     mask_generator = SamAutomaticMaskGenerator(
         model=sam,
-        **config.phase_ldi.masking.segmask_detection
+        **config.ldi.masking.segmask_detection
     )
     return sam, mask_generator
 
@@ -2535,7 +2558,7 @@ if __name__ == "__main__":
         logging=plot_results, 
         where_save=savedir,
     )
-    if config.phase_ldi.depth_inpainting.apply_post_processing:
+    if config.ldi.depth_inpainting.apply_post_processing:
         depth_inpainted_hblending_pp = post_process_inpainted_depth(
             depth_bg=depth_inpainted_hblending,
             depth_fg=depth_origin,
@@ -2554,9 +2577,9 @@ if __name__ == "__main__":
         pipe_dp=pipe_dp,
         rescale_to_min_depth=False,
         plot_results=plot_results,
-        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+        pad_width=config.ldi.depth_inpainting.pad_width,
     )
-    if config.phase_ldi.depth_inpainting.apply_post_processing:
+    if config.ldi.depth_inpainting.apply_post_processing:
         depth_inpainted_infusion_pp = post_process_inpainted_depth(
             depth_bg=depth_inpainted_infusion,
             depth_fg=depth_origin,
@@ -2570,9 +2593,9 @@ if __name__ == "__main__":
     depth_inpainted_nn = interpolate_depth_nearest(
         depth=depth_origin,
         bg_mask=inpaint_mask_bool_,
-        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+        pad_width=config.ldi.depth_inpainting.pad_width,
     )
-    if config.phase_ldi.depth_inpainting.apply_post_processing:
+    if config.ldi.depth_inpainting.apply_post_processing:
         depth_inpainted_nn_pp = post_process_inpainted_depth(
             depth_bg=depth_inpainted_nn,
             depth_fg=depth_origin,
@@ -2585,9 +2608,9 @@ if __name__ == "__main__":
     depth_inpainted_bilinear_nn = interpolate_depth_bilinear_plus_nn(
         depth=depth_origin,
         bg_mask=inpaint_mask_bool_,
-        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+        pad_width=config.ldi.depth_inpainting.pad_width,
     )
-    if config.phase_ldi.depth_inpainting.apply_post_processing:
+    if config.ldi.depth_inpainting.apply_post_processing:
         depth_inpainted_bilinear_nn_pp = post_process_inpainted_depth(
             depth_bg=depth_inpainted_bilinear_nn,
             depth_fg=depth_origin,
@@ -2600,7 +2623,7 @@ if __name__ == "__main__":
     del pipe_dp
     torch.cuda.empty_cache()
 
-    if config.phase_ldi.depth_inpainting.apply_post_processing:
+    if config.ldi.depth_inpainting.apply_post_processing:
         depth_origin_pp = post_process_inpainted_depth(
             depth_bg=depth_origin,
             depth_fg=depth_origin,
@@ -2610,9 +2633,9 @@ if __name__ == "__main__":
         depth_origin_pp = depth_origin
 
     suptitle=f""" == Depth Inpainting Results == 
-    Additionnal mask dilation: {config.phase_ldi.depth_inpainting.additionnal_mask_dilation_px} px
-    Fill holes: {config.phase_ldi.depth_inpainting.fill_holes}
-    Depth padding width: {config.phase_ldi.depth_inpainting.pad_width} px
+    Additionnal mask dilation: {config.ldi.depth_inpainting.additionnal_mask_dilation_px} px
+    Fill holes: {config.ldi.depth_inpainting.fill_holes}
+    Depth padding width: {config.ldi.depth_inpainting.pad_width} px
     """ 
     print(suptitle)
     visualize_depth_inpainting(

@@ -42,11 +42,11 @@ def get_save_viz_path(dream):
 
 if __name__ == "__main__":
     config = my_utils.fetch_config_via_parser(
-        debug=True, 
+        debug=False, 
         debug_parser_override=["--config", "Antoine/debug.yaml"]
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
-    plot_results = config.phase_ldi.save_plots
+    plot_results = config.ldi.save_plots
 
     spherical_dreamer = SphericalDreamer(
         pano_width=width,
@@ -79,8 +79,8 @@ if __name__ == "__main__":
                 depth_estimated       = data['depth_estimated']
                 pano_rgb_inpainted    = data['pano_rgb_inpainted']
 
-                list_img.append(my_utils.PIL_to_numpy(pano_rgb_inpainted))
-                list_depth_origin.append(depth_estimated)
+                list_img.append(my_utils.opencv_resize(my_utils.PIL_to_numpy(pano_rgb_inpainted), config.height, config.width, mode="bilinear"))
+                list_depth_origin.append(my_utils.opencv_resize(depth_estimated, config.height, config.width, mode="bilinear"))
 
             # ---------------------------------------
             # I. COMPUTE MASK FOR FOREGROUND OBJECTS
@@ -177,7 +177,7 @@ if __name__ == "__main__":
             list_depth_origin_resized = []
             list_img_pil_resized = []
             # preparation
-            if config.phase_ldi.depth_inpainting.method == "infusion":
+            if config.ldi.depth_inpainting.method == "infusion":
                 pipe_dp = ldi.instanciate_pipe_dp()
 
             for i in range(1, config.num_dreams):
@@ -193,7 +193,7 @@ if __name__ == "__main__":
                 list_depth_origin_resized.append(depth_origin)
                 list_img_pil_resized.append(img_pil)
 
-                if config.phase_ldi.depth_inpainting.method == "harmonic_blending":
+                if config.ldi.depth_inpainting.method == "harmonic_blending":
                         depth_360_mono = spherical_dreamer.estimate_pano_depth(inpaint_pano_pil)
                         inpaint_pano = np.array(inpaint_pano_pil) / 255.0
                         _, _, _, depth_inpainted_hblending = harmonic_blend_of_depths(
@@ -210,7 +210,7 @@ if __name__ == "__main__":
                             where_save=save_viz_path, 
                         )
 
-                elif config.phase_ldi.depth_inpainting.method == "infusion":
+                elif config.ldi.depth_inpainting.method == "infusion":
                     depth_inpainted = ldi.inpaint_bg_depth_infusion(
                         image=img_pil,
                         depth=depth_origin,
@@ -218,30 +218,30 @@ if __name__ == "__main__":
                         bg_mask=inpaint_mask_pil,
                         pipe_dp=pipe_dp,
                         rescale_to_min_depth=True,
-                        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
                         plot_results=plot_results,
                         save_path=save_viz_path,
                     )
 
-                elif config.phase_ldi.depth_inpainting.method == "nearest":
+                elif config.ldi.depth_inpainting.method == "nearest":
                     depth_inpainted = ldi.interpolate_depth_nearest(
                         depth=depth_origin,
                         bg_mask=inpaint_mask_bool_,
-                        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
                     )
                 
-                elif config.phase_ldi.depth_inpainting.method == "bilinear_plus_nn":
+                elif config.ldi.depth_inpainting.method == "bilinear_plus_nn":
                     depth_inpainted = ldi.interpolate_depth_bilinear_plus_nn(
                         depth=depth_origin,
                         bg_mask=inpaint_mask_bool_,
-                        pad_width=config.phase_ldi.depth_inpainting.pad_width,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
                     )
                 
                 else:
-                    raise ValueError(f"Unknown depth inpainting method: {config.phase_ldi.depth_inpainting.method}")
+                    raise ValueError(f"Unknown depth inpainting method: {config.ldi.depth_inpainting.method}")
 
                 depth_inpainted[~inpaint_mask_bool_] = np.nan
-                if config.phase_ldi.depth_inpainting.apply_post_processing:
+                if config.ldi.depth_inpainting.apply_post_processing:
                     depth_inpainted = ldi.post_process_inpainted_depth(
                         depth_bg=depth_inpainted,
                         depth_fg=depth_origin,
@@ -251,20 +251,20 @@ if __name__ == "__main__":
                     )
                 list_depth_inpainted.append(depth_inpainted)
 
-            if config.phase_ldi.depth_inpainting.method == "infusion":
+            if config.ldi.depth_inpainting.method == "infusion":
                 del pipe_dp
             torch.cuda.empty_cache()
-            print(f"Depth inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images with method {config.phase_ldi.depth_inpainting.method}.")
+            print(f"Depth inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images with method {config.ldi.depth_inpainting.method}.")
 
             # SAVE RESULTS
             for i in range(1, config.num_dreams):
-                if config.phase_ldi.depth_inpainting.method == "harmonic_blending":
+                if config.ldi.depth_inpainting.method == "harmonic_blending":
                     suffix="hblending"
-                elif config.phase_ldi.depth_inpainting.method == "infusion":
+                elif config.ldi.depth_inpainting.method == "infusion":
                     suffix="infusion"
-                elif config.phase_ldi.depth_inpainting.method == "nearest":
+                elif config.ldi.depth_inpainting.method == "nearest":
                     suffix="nn"
-                elif config.phase_ldi.depth_inpainting.method == "bilinear_plus_nn":
+                elif config.ldi.depth_inpainting.method == "bilinear_plus_nn":
                     suffix="bilinear_nn"
 
                 kwargs = {

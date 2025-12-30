@@ -5,73 +5,6 @@ import matplotlib.pyplot as plt
 import os
 import time
 
-def concat_with_meta(*arrays):
-    """
-    Concatenate arrays along axis=0 and return:
-      - concatenated array
-      - meta information enabling reconstruction of original arrays
-    
-    Parameters
-    ----------
-    *arrays : list of np.ndarray
-        Arrays compatible for concatenation along axis 0.
-
-    Returns
-    -------
-    concatenated : np.ndarray
-    meta : dict storing reconstruction info
-    """
-    # Validate input
-    if len(arrays) == 0:
-        raise ValueError("At least one array must be provided.")
-
-    # Record first-dimension sizes for later splitting
-    lengths = [arr.shape[0] for arr in arrays]
-
-    # Perform concatenation
-    concatenated = np.concatenate(arrays, axis=0)
-
-    # Meta info: lengths + total number of arrays
-    meta = {
-        "lengths": lengths,
-        "n_arrays": len(arrays)
-    }
-
-    return concatenated, meta
-
-def undo_concat(concatenated, meta):
-    """
-    Undo a concatenation operation performed by concat_with_meta.
-    
-    Parameters
-    ----------
-    concatenated : np.ndarray
-        The concatenated output array.
-    meta : dict
-        Must contain:
-          - "lengths": list of sizes along axis 0 for original arrays
-          - "n_arrays": number of arrays originally concatenated
-
-    Returns
-    -------
-    arrays : list of np.ndarray
-        The original arrays recovered.
-    """
-    lengths = meta["lengths"]
-    n_arrays = meta["n_arrays"]
-
-    # Ensure the metadata matches
-    if len(lengths) != n_arrays:
-        raise ValueError("Mismatch between number of arrays and lengths metadata.")
-
-    arrays = []
-    start = 0
-    for L in lengths:
-        end = start + L
-        arrays.append(concatenated[start:end])
-        start = end
-
-    return arrays
 
 def check_partition(*masks):
     """Return True if masks are disjoint and cover the full image."""
@@ -88,6 +21,8 @@ def get_harmonic_blending_mask(missing_info_mask):
     """
     missing_info_mask: np.array of shape [H, W] with dtype bool. True where info is missing i.e. where we inpainted
     """
+    # TODO: I think we should erode mask1 a bit. Make the boundary more "inside" mask1
+    missing_info_mask = my_utils.dilate_mask(missing_info_mask, pixels=3)
     mask1 = ~missing_info_mask
     mask2 = missing_info_mask
     boundary = find_boundaries(mask1, mode='inner', background=False)  # [H, W]
@@ -262,8 +197,8 @@ def harmonic_blend_of_depths_ldi(
         to_cat_mask.append(_mask_ldi)
 
 
-    pts_deform, cat_meta = concat_with_meta(*to_cat)
-    _mask_boundary, _ = concat_with_meta(*to_cat_mask)
+    pts_deform, cat_meta = my_utils.concat_with_meta(*to_cat)
+    _mask_boundary, _ = my_utils.concat_with_meta(*to_cat_mask)
 
     # Deformation
     assert np.any(np.isnan(pts_deform)) == False, "Error: pts_deform contains NaNs"
@@ -282,7 +217,7 @@ def harmonic_blend_of_depths_ldi(
     t1 = time.time()
     print(f"Harmonic deformation took {t1 - t0:.1f}s")
 
-    undid_cat = undo_concat(pts_deformED, cat_meta)
+    undid_cat = my_utils.undo_concat(pts_deformED, cat_meta)
     pts_deformED_exb = undid_cat[0]
     pts_deformED_boundary = undid_cat[1]
 

@@ -1,0 +1,9 @@
+expname: Desert_debug_floor_corr
+prompt: An endless arid environment of rolling sand dunes and cracked earth, shaped by wind and heat, with sparse vegetation, intense sunlight, and a vast open sky.
+
+load_phase1a_from: Desert
+load_phase1b_from: Desert
+load_phase2a_from: Desert
+load_phase2b_from: Desert
+load_phase2c_from: Desert
+load_phase3_from: null #TODO: implemtement this

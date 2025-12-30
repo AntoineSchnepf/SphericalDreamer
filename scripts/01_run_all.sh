@@ -12,10 +12,16 @@ fi
 
 # Define array of configs
 configs=(
-    "Antoine/C0_city.yaml"
-    "Antoine/C1_city_corr.yaml"
-    "Antoine/F0_forest.yaml"
-    "Antoine/S0_seaside.yaml"
+    exp0/0_caverns.yaml
+    # exp0/0_cityscape.yaml
+    # exp0/0_desert.yaml
+    # exp0/0_highland.yaml
+    # exp0/0_plains.yaml
+    # exp0/0_ruins.yaml
+    # exp0/0_stronghold.yaml
+    # exp0/0_tundra.yaml
+    exp0/0_volcanic.yaml
+    exp0/0_wetland.yaml
 )
 
 # Run experiments

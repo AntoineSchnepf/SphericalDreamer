@@ -7,6 +7,7 @@ load_phase1b_from: null
 load_phase2a_from: null
 load_phase2b_from: null
 load_phase2c_from: null
+load_phase3_from: null #TODO: implemtement this
 
 
 # ----- main args  -----
@@ -20,7 +21,6 @@ delta_walk: 1.57
 raise_intermediate_camera_by_z: 0.3    
 
 geometry_correction:
-
   sphere:
     correct_depth: False
     near: 0.1
@@ -29,41 +29,14 @@ geometry_correction:
     correct_floor: False
     depth_threshold_for_floor_correction: 0.6
     remove_sky: False
-    remove_outliers: True
-    outlier_removal_options:
-      nb_neighbors: 20
-      std_ratio: 2.0
     verbose: False
     plot: False
-
-  world:
-    correct_depth: False
-    near: 0.1
-    far: 1.0
-    correct_walls: False
-    correct_floor: True
-    depth_threshold_for_floor_correction: 1.0
-    remove_outliers: False
 
 world_opening:
   opening_mode: cut+cylinder
   delta_cut: 2.0943 # radians
 
-phase1: # panorama generation
-  override_with_inpaint: False
-
-phase2: # pairs of sphere inpainting + deformation
-  skip_inpainting: False
-  inpainting_resolution:
-    height: 1024
-    width: 2048
-  inpainting_blend_mode: compose #'seamless' or 'compose'
-  excessive_pcd_logging: False
-  rotate_intermediate_camera_by_deg: 0.0
-  rendering_version: 0 # 0, 1 or 2
-  apply_ldi: True
-
-phase_ldi: # layered depth image
+ldi: # layered depth image
   masking:
     edges_detection:
       remove_depth_low_freq:
@@ -114,7 +87,85 @@ phase_ldi: # layered depth image
     apply_post_processing: True
   save_plots: True
   
+phase1: # panorama generation
+  override_with_inpaint: False
+  apply_ldi: True 
+  outliers_removal: 
+    apply_on_fg: True
+    apply_on_ldi: False
+    options:
+      nb_neighbors: 20
+      std_ratio: 1.7 # increase to remove fewer points
+      verbose: True
+
+phase2: # pairs of sphere inpainting + deformation
+  apply_ldi: True
+  rendering_version: 0 # 0, 1 or 2
+  skip_inpainting: False
+  inpainting_resolution:
+    height: 1024
+    width: 2048
+  inpainting_blend_mode: compose # 'compose' or 'seamless' # seamless fails on some images. Use compose.
+  rotate_intermediate_camera_by_deg: 0.0
+  outliers_removal: 
+    apply_on_fg: True
+    apply_on_ldi: False
+    options:
+      nb_neighbors: 20
+      std_ratio: 2.1 # increase to remove fewer points
+      verbose: True
+  excessive_pcd_logging: False
+
+phase3: # world geometry correction
+  pointcloud_downsampling:
+    mode: "auto" # in ['deactivated', 'auto', 'voxel', 'skip']
+    skip_options:
+      stride: 10
+    voxel_options:
+      voxel_size: 0.01
+    auto_options:
+      num_max_points: 50e6
+
+  world_correction:
+    apply: True
+    options:
+      correct_depth: False
+      near: 0.1
+      far: 1.0
+      correct_walls: False
+      correct_floor: True
+      depth_threshold_for_floor_correction: 1.0
+
+  remove_outliers:
+    apply: False # all outliers should have been already removed in phase1 and phase2
+    options:
+      nb_neighbors: 20
+      std_ratio: 5.0
+
 phase4: # render video
+  visualize_removed_points: False
+  point_size: 3.0
+  bg_color: [0, 0, 0, 1]
+  width: 512
+  height: 512
+
+  render_settings:
+    trajectory: walk_lookaround # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
+    custom_trajectory: [] # List of [x, y, z, elev, azim], only used if trajectory is 'custom'
+    ranges:
+      min_x: 0.0
+      min_y: -1.0
+      max_y: 1.0
+      min_z: -0.1
+      mid_z: 0.1
+      max_z: 1.5
+    framerate:
+      fps: 60
+      fpm: 60
+      fpd_e: 1
+      fpd_a: 1
+
+phase5: # render nfs dataset
   visualize_removed_points: False
   fix_world: True
   point_size: 3.0
@@ -134,20 +185,19 @@ phase4: # render video
     depth_threshold_for_floor_correction: 1.0
     remove_outliers: False
   render_settings:
-    trajectory: walk_lookaround # in ['walk', 'walk_look', 'walk_lookaround', 'zigzag', 'walk_lookupdown', 'custom']
-    custom_trajectory: [] # List of [x, y, z, elev, azim], only used if trajectory is 'custom'
-    ranges:
+    nb_points: 500
+    nb_samples_per_point: 10
+    ranges: 
       min_x: 0.0
-      min_y: -1.0
-      max_y: 1.0
+      min_y: -0.2
+      max_y: 0.2
       min_z: -0.1
-      mid_z: -0.1
-      max_z: 1.5
-    framerate:
-      fps: 60
-      fpm: 60
-      fpd_e: 1
-      fpd_a: 1
+      max_z: 0.3
+
+phase6: # train splatfacto
+  near_plane: 0.08
+  far_plane: 86.0
+  background_color: black
 
 
 # tuned args
@@ -161,11 +211,3 @@ seed_offsets: [0, 9, 20, 33, 45]
 # logging
 save_dir: OUTPUTS/SphericalDreamerRecurse
 
-
-# trajectory: "detault" # 'detault' or 'custom' and zigzag and lookup
-# translate: [0.1, 0.2, 0.1]
-# rotate: [
-#   [180, -180],
-#   [90],
-#   [360],
-# ]
