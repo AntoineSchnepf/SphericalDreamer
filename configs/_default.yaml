@@ -194,6 +194,43 @@ phase5: # render nfs dataset
       min_z: -0.1
       max_z: 0.3
 
+phase5v2:
+  render_settings:
+    render_engine: CYCLES
+    use_gpu_series: True   
+    use_gpu_parallel: False 
+    width: 512
+    height: 512
+    point_size: 0.0022
+    keep_ratio: 0.9 # is ignored if <1 and voxel_size is not None
+    voxel_size: 0.0012 # voxel-based downsampling. If None, random downsampling is used.
+    min_near_plane: 0.01
+    max_far_near_ratio: 100000
+  advanced_render_settings:
+    use_fast_points: True # use flat discs instead of icospheres
+    use_distance_based_point_size: True # closer points are bigger
+    use_backface_culling: False # delete points facing away from the camera
+    render_samples: 8 # 8=fast/aliased, 32=balanced, 64+=high quality
+    pixel_filter_width: 1.0    # 1.0=sharp, 1.5=balanced, 2.0+=soft/blurry
+    distance_culling:
+      apply: False
+      min_distance: 0.02
+      max_distance: 5.0
+    max_render_distance: null
+  nfs_dataset:
+    bg_color: [0, 0, 0, 1]
+    fov_deg: 60.0
+    nb_points: 500
+    nb_samples_per_point: 10
+    ranges:
+      min_x: 0.0
+      min_y: -0.2
+      max_y: 0.2
+      min_z: -0.1
+      max_z: 0.3
+
+  
+
 phase6: # train splatfacto
   near_plane: 0.08
   far_plane: 86.0

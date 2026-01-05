@@ -22,3 +22,19 @@ phase2: # pairs of sphere inpainting + deformation
       nb_neighbors: 20
       std_ratio: 1.8
       verbose: True
+
+phase5v2:
+  render_settings:
+    use_gpu_series: True   
+    use_gpu_parallel: True 
+  nfs_dataset:
+    bg_color: [0, 0, 0, 1]
+    fov_deg: 60.0
+    nb_points: 1000
+    nb_samples_per_point: 5
+    ranges:
+      min_x: 0.0
+      min_y: -0.2
+      max_y: 0.2
+      min_z: -0.1
+      max_z: 0.3
