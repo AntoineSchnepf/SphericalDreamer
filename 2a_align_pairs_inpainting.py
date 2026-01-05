@@ -47,8 +47,6 @@ _phase_2c = "2c"
 
 _phase_current = _phase_2a
 
-import numpy as np
-
 
 def largest_connected_component(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
     """

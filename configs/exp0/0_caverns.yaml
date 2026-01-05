@@ -8,3 +8,6 @@ load_phase2a_from: null
 load_phase2b_from: null
 load_phase2c_from: null
 load_phase3_from: null #TODO: implemtement this
+
+phase2:
+  excessive_pcd_logging: True

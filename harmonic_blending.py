@@ -247,6 +247,9 @@ def harmonic_blend_of_depths_ldi(
         plt.savefig(where_save / phase / "08_blended_depth_harmonic.png")
         plt.show()
 
+        depth_pil = my_utils.depth_to_pil(blended_depth_harmonic, cmap_name="plasma", vmin=0.1, vmax=1.8)
+        depth_pil.save(where_save / phase / "08_blended_depth_harmonic_pil.png")
+
     res = {
         "pts_out": pts_out,
         "colors_out": colors_out,
@@ -282,5 +285,8 @@ def naive_blend_of_depths(colors, warped_depth_interp, depth_estimated, missing_
         plt.title('Blended Depth Naive')
         plt.savefig(where_save / phase / "08_blended_depth_naive.png")
         plt.show()
+
+        depth_pil = my_utils.depth_to_pil(blended_depth, cmap_name="plasma", vmin=0.1, vmax=1.8)
+        depth_pil.save(where_save / phase / "08_blended_depth_naive_pil.png")
 
     return pcd_naive, blended_depth

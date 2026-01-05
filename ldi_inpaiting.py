@@ -1334,7 +1334,6 @@ def lama_flux_double_inpainting_p2(
 
 
 # STEP III: Depth Inpainting Pipeline (copyright: Infusion, LayerPano3D)
-
 def pad_equirectangular(depth, pad_width, mask=None, rgb=None):
     """
     Pad an equirectangular depth map horizontally by wrapping columns:
@@ -1834,7 +1833,7 @@ def post_process_inpainted_depth(
     depth_bg,
     depth_fg,
     bg_mask,
-    eps=1e-3,
+    eps=1.1e-3,
     plot=False,
     save_path=None,
 ):

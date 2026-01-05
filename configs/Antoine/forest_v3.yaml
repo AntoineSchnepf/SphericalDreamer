@@ -22,3 +22,5 @@ phase2: # pairs of sphere inpainting + deformation
       nb_neighbors: 20
       std_ratio: 1.8
       verbose: True
+      
+  excessive_pcd_logging: True

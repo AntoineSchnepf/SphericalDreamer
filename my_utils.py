@@ -27,6 +27,7 @@ import shutil
 from pathlib import Path
 import imageio.v2 as imageio
 import open3d as o3d
+import matplotlib.cm as cm
 
 
 # -------------------------------------------- #
@@ -581,6 +582,39 @@ def xyz_to_rgb(pts, r=None, coord_type='cartesian'):
 
     return np.stack([R, G, B], axis=-1)
 
+def depth_to_pil(depth, cmap_name="plasma", vmin=None, vmax=None):
+    """
+    Convert a depth map to a PIL image using a colormap.
+    Depth values exactly equal to zero are rendered in black.
+    """
+    depth = depth.copy()
+
+    # Masks
+    valid = np.isfinite(depth)
+    zero_mask = (depth == 0) | ~valid
+
+    # Compute normalization range (exclude zeros if you want)
+    valid_nonzero = valid & (~zero_mask)
+    if vmin is None:
+        vmin = depth[valid_nonzero].min()
+    if vmax is None:
+        vmax = depth[valid_nonzero].max()
+
+    depth_norm = np.zeros_like(depth, dtype=np.float32)
+    depth_norm[valid_nonzero] = (depth[valid_nonzero] - vmin) / (vmax - vmin + 1e-8)
+    depth_norm = np.clip(depth_norm, 0.0, 1.0)
+
+    # Apply colormap
+    cmap = cm.get_cmap(cmap_name)
+    depth_color = cmap(depth_norm)[..., :3]  # drop alpha
+
+    # Force zero-depth pixels to black
+    depth_color[zero_mask] = 0.0
+
+    # Convert to uint8
+    depth_color = (depth_color * 255).astype(np.uint8)
+
+    return Image.fromarray(depth_color)
 # ------------------------------------------ #
 # ----- Numpy - PIL conversions / utils -----#
 # ------------------------------------------ #
@@ -4907,7 +4941,7 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.show()
 
-    test_displancement_fn=True
+    test_displancement_fn=False
     if test_displancement_fn:
         displacement_fn = build_disk_to_square_displacement_fn(
             center=(0.0, 0.0),
@@ -4920,8 +4954,8 @@ if __name__ == "__main__":
             plot=True,
         )
 
-    test_old=True
-    if test_old:
+    test_opening=True
+    if test_opening:
         # --- existing setup (your code above this) ---
         perturn_scale = 0.0
         N_th, N_ph = 400, 400
