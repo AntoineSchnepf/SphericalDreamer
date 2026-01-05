@@ -86,7 +86,12 @@ if __name__ == "__main__":
 
     # Save pcd as .ply
     t0 = time.time()
-    my_pcd = PointCloud_instance.get_o3d_pointcloud()
+    # my_pcd = PointCloud_instance.get_o3d_pointcloud()
+    points = np.asarray(PointCloud_instance.pts, dtype=np.float32)
+    colors = np.asarray(PointCloud_instance.colors, dtype=np.float32)
+    my_pcd = o3d.geometry.PointCloud()
+    my_pcd.points = o3d.utility.Vector3dVector(points)
+    my_pcd.colors = o3d.utility.Vector3dVector(colors)
     printc(f"--- {_phase_current}: Converted to o3d point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
     t0 = time.time()
     o3d.io.write_point_cloud(save_dir_ /f"{_phase_3}_final_dream_pcd_unfiltered.ply", my_pcd)

@@ -13,6 +13,7 @@ import my_utils
 import sys
 from functools import reduce
 import cv2
+from pathlib import Path
 # bilateral filtering (copyright: 3DP)
 def sparse_bilateral_filtering(
     depth, image, config, HR=False, mask=None, gsHR=True, edge_id=None, num_iter=None, num_gs_iter=None, spdb=False
@@ -332,8 +333,30 @@ def sobel_edges_from_depth(depth, mask=None, ksize=3):
     return edges_uint8
 
 def canny_edges_from_depth(depth, mask=None, low=50, high=150):
-    edges_mag = sobel_edges_from_depth(depth, mask=mask)
-    edges_canny = cv2.Canny(edges_mag, low, high)
+
+    depth_proc = depth.copy().astype(np.float32)
+
+    # Apply mask if provided
+    if mask is not None:
+        depth_proc[~mask] = np.nan
+
+    # Replace NaNs with median of valid depth
+    valid = np.isfinite(depth_proc)
+    if not np.any(valid):
+        raise ValueError("No valid depth values for edge detection.")
+    median_val = np.median(depth_proc[valid])
+    depth_proc[~valid] = median_val
+
+    # Normalize depth to [0, 255] for Sobel (optional but helps)
+    dmin, dmax = depth_proc.min(), depth_proc.max()
+    if dmax > dmin:
+        depth_norm = (depth_proc - dmin) / (dmax - dmin)
+    else:
+        depth_norm = np.zeros_like(depth_proc)
+    depth_8u = (depth_norm * 255.0).astype(np.uint8)
+
+    edges_canny = cv2.Canny(depth_8u, low, high)
+
     return edges_canny
 
 depth_sharpen_default_config = {
@@ -439,8 +462,8 @@ if __name__ == "__main__":
     # ---------------------------------------- #
 
 
-    save_dir = "/Users/a.schnepf/Documents/code/phd/scene_gen/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse"
-    save_dir_ = f"{save_dir}/{expname}"
+    save_dir = Path("/Users/a.schnepf/Documents/code/phd/scene_gen/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse")
+    save_dir_ = save_dir / expname
 
     # --- script init --- 
     width = 1440
@@ -451,8 +474,8 @@ if __name__ == "__main__":
     NEAR=0.2
     pcd_upsampling_factor = 4
     apply_sharpening = False
-    apply_canny_edge_removal = False
-    remove_3D_outliers = True
+    apply_canny_edge_removal = True
+    remove_3D_outliers = False
     config.pcd_upsampling_factor = int(pcd_upsampling_factor)
 
           
@@ -486,13 +509,27 @@ if __name__ == "__main__":
         "remove_outliers": remove_3D_outliers,
         "outlier_removal_options": {
             "nb_neighbors": 20,
-            "std_ratio": 1.8,
+            "std_ratio": 1.5,
         },
         "verbose": False,
         "plot": True,
     }
+    
+    def load_rgbd_pano(dream, save_dir_, override_depth_with_ones=False):
+        load_dir__ = save_dir_ / f"dream_{dream:02d}" 
 
-    colors1, depth1 = my_utils.load_rgbd_pano(
+        pano_rgb = Image.open(load_dir__ /  f"XX_pano_rgb.png")
+        colors = my_utils.PIL_to_numpy(pano_rgb)
+
+        depth = np.load(load_dir__ /  f"XX_depth.npy")
+        
+        if override_depth_with_ones:
+            depth = np.ones_like(depth)  
+            print("WARNING: depth override to ones for debugging purposes")
+
+        return colors, depth
+
+    colors1, depth1 = load_rgbd_pano(
         dream=0,
         save_dir_=save_dir_
     )

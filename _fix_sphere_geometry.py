@@ -9,6 +9,7 @@ import time
 from IPython import get_ipython
 import matplotlib.pyplot as plt
 import my_utils 
+get_sphere = __import__('2a_align_pairs_inpainting.py').get_sphere
 
 def is_notebook() -> bool:
     try:
@@ -22,6 +23,27 @@ def is_notebook() -> bool:
     except NameError:
         return False      # Probably standard Python interpreter
 
+
+
+if __name__ == "__main__":
+    config = my_utils.fetch_config_via_parser(
+        debug=False, 
+        debug_parser_override=["--config", "Antoine/F0_forest.yaml"]
+    )
+    seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
+
+
+        
+    # INIT: load data for sphere1
+    sphere1 = get_sphere(
+        dream=0,
+        save_dir_=save_dir_,
+        config=config,
+        height=height,
+        width=width
+    )
+    pose1 = pose_init
+    sphere1.update_pose(pose1)
 
 
 if __name__ == "__main__":
@@ -76,23 +98,22 @@ if __name__ == "__main__":
 
     colors1, depth1 = my_utils.load_rgbd_pano(
         dream=0,
-        save_dir_=save_dir_
+        save_dir_=save_dir_,
     )
-    # depth1 = np.ones_like(depth1) * 1.0  # dummy depth for testing
+    depth1 = np.ones_like(depth1) * 1.0  # dummy depth for testing
 
     pts1_carte = my_utils.depth2cam_carte(
         depth=depth1,
         sphere_radius=sphere_radius,
         height=height,
         width=width,
-    ) 
+    )
     pts1_carte_corrected, colors1_corrected = my_utils.run_corrective_pipeline_on_sphere(
         pts1_carte, # in cartesian coordinates
         colors1, 
         height, width, 
         **sphere_correction_kwargs
     )
-
 
     sphere1 = my_utils.Sphere(
         pose1, pts1_carte_corrected, colors1_corrected, 
