@@ -1,9 +1,15 @@
-expname: Caverns_dilate_hblend_mask
+expname: Caverns
 prompt: A vast subterranean environment of winding tunnels, towering rock formations, echoing chambers, and glowing mineral deposits, shaped by water and geological forces.
+
 
 load_phase1a_from: Caverns
 load_phase1b_from: Caverns
-load_phase2a_from: Caverns
-load_phase2b_from: Caverns
+load_phase2a_from: null
+load_phase2b_from: null
 load_phase2c_from: null
 load_phase3_from: null #TODO: implemtement this
+
+phase2:
+  excessive_pcd_logging: True
+
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp0

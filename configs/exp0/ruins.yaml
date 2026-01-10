@@ -7,3 +7,5 @@ load_phase2a_from: Ruins
 load_phase2b_from: Ruins
 load_phase2c_from: Ruins
 load_phase3_from: null #TODO: implemtement this
+
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp0

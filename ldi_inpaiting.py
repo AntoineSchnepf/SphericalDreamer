@@ -38,7 +38,7 @@ from src.Infusion.depth_inpainting.inference.depth_inpainting_pipeline_half impo
 )
 from matplotlib import colors
 from harmonic_blending import harmonic_blend_of_depths
-
+from pathlib import Path
 
 # STEP 1: FOREGROUD OBJECT MASK GENERATION
 # remove low frequency from depth (my code)
@@ -206,6 +206,69 @@ def get_low_freq_via_gaussian_filter(img, sigma_h=50.0, sigma_v=50.0):
 
     return low_img
 
+def get_low_freq_via_hmax(img, smooth_v=None, ignore_invalid=True):
+    """
+    Row-constant "low-frequency" image built from the horizontal maximum.
+
+    For each row y, we compute:
+        v[y, c] = max_x img[y, x, c]
+    and broadcast it back over width, so each row is constant across columns.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Array of shape (H, W) or (H, W, C), dtype float or uint8.
+        (Works for depth too; typically (H, W).)
+    smooth_v : int or None
+        If not None, applies a vertical max-filter of size `smooth_v`
+        on the per-row profile (helps reduce row-wise noise).
+    ignore_invalid : bool
+        If True, ignore NaNs and non-positive values when taking the max
+        (useful for depth maps with zeros/NaNs). Falls back to 0 if a row has no valid values.
+
+    Returns
+    -------
+    low_img : np.ndarray
+        Row-constant image with same shape and dtype semantics as input.
+    """
+    img = np.asarray(img)
+    is_uint8 = (img.dtype == np.uint8)
+    img_f = img.astype(np.float32)
+
+    # If grayscale / depth (H, W), add a channel dimension
+    squeeze_channel = False
+    if img_f.ndim == 2:
+        img_f = img_f[..., None]  # (H, W, 1)
+        squeeze_channel = True
+
+    H, W, C = img_f.shape
+
+    if ignore_invalid:
+        # treat NaNs and <=0 as invalid (common for depth)
+        valid = np.isfinite(img_f) & (img_f > 0)
+        tmp = img_f.copy()
+        tmp[~valid] = -np.inf
+        row_profile = np.max(tmp, axis=1)  # (H, C)
+        row_profile[~np.isfinite(row_profile)] = 0.0  # rows with no valid pixels
+    else:
+        row_profile = np.max(img_f, axis=1)  # (H, C)
+
+    # Optional vertical smoothing on the profile
+    if smooth_v is not None and smooth_v > 1:
+        row_profile = maximum_filter1d(row_profile, size=int(smooth_v), axis=0)
+
+    # Broadcast back across width → row-constant image
+    low_img = np.repeat(row_profile[:, None, :], W, axis=1)  # (H, W, C)
+
+    # Restore original dimensionality / dtype
+    if squeeze_channel:
+        low_img = low_img[..., 0]
+
+    if is_uint8:
+        low_img = np.clip(low_img, 0, 255).astype(np.uint8)
+
+    return low_img
+
 def remove_low_freq(depth, config):
     """
     Remove low vertical frequencies from a depth map.
@@ -240,9 +303,13 @@ def remove_low_freq(depth, config):
         sigma_v = config.gaussian.sigma_v
         sigma_h = config.gaussian.sigma_h
         low_freq = get_low_freq_via_gaussian_filter(depth, sigma_v=sigma_v, sigma_h=sigma_h)
+    elif config.method == 'hmax':
+        smooth_v = config.hmax.smooth_v
+        smooth_v = config.hmax.smooth_v if 'smooth_v' in config.hmax else None
+        low_freq = get_low_freq_via_hmax(depth, smooth_v=smooth_v, ignore_invalid=True)
     else:
         raise ValueError(f"Unknown method: {config.method}. Should be either 'fourier' or 'gaussian'.")
-    depth_high = depth - low_freq
+    depth_high = depth - low_freq 
     return depth_high, low_freq
 
 def visualize_low_freq_removal(depth_origin, low_freq, depth, title_prefix="", save_path=None):
@@ -735,6 +802,39 @@ def visualize_canny_sobel_edges(image, depth_origin, depth, depth_sharpened, edg
 
 
 # segmask scoring functions
+def get_mask_score_via_hdistance_to_max_depth(
+    seg: np.ndarray,
+    depth_rect: np.ndarray,
+    *,
+    use_median: bool = False
+) -> float:
+    """
+    Score a segmentation mask using the rectified depth map.
+
+    Parameters
+    ----------
+    seg : (H, W) bool or {0,1} array
+        Segmentation mask.
+    depth_rect : (H, W) float
+        Rectified depth map (horizontal maxima removed).
+    use_median : bool
+        If True, use median depth; otherwise use mean.
+
+    Returns
+    -------
+    score : float
+        Average depth value inside the mask.
+        Lower values typically indicate foreground (closer).
+    """
+    seg = seg.astype(bool)
+
+    dvals = depth_rect[seg]
+    if dvals.size == 0:
+        return np.inf
+
+    segmask_depth = np.median(dvals) if use_median else np.mean(dvals) # betweem 0. and 1.
+    return segmask_depth
+
 def mask_boundary(seg, radius=1):
     """
     seg : (H, W) bool
@@ -744,91 +844,6 @@ def mask_boundary(seg, radius=1):
     eroded = binary_erosion(seg, structure=struct, border_value=0)
     boundary = seg & ~eroded   # pixels that disappear under erosion
     return boundary
-
-def border_alignment_score(seg, dt_edge, max_dist=2):
-    """
-    seg     : (H, W) bool mask
-    dt_edge : (H, W) float, distance transform of Canny edges
-    max_dist: pixels threshold for 'aligned' (2–3 is typical)
-    
-    Returns:
-        coverage : fraction of boundary pixels within max_dist of an edge
-        mean_dist: mean distance from boundary to nearest edge
-    """
-    boundary = mask_boundary(seg, radius=1)
-    if not np.any(boundary):
-        return 0.0, np.inf
-
-    dvals = dt_edge[boundary]
-    if len(dvals) == 0:
-        return 0.0, np.inf
-
-    hits = dvals <= max_dist
-    coverage = hits.sum() / len(dvals)
-    mean_dist = dvals.mean()
-    return coverage, mean_dist
-
-def border_weighted_edge_strength(boundary, edges_sobel):
-    vals = edges_sobel[boundary]
-    return vals.mean() if len(vals) > 0 else 0.0
-
-def depth_inside_outside_along_edges(seg,
-                                     depth,
-                                     edges_bool,
-                                     valid_mask=None,
-                                     band_radius=2,
-                                     edge_radius=1,
-                                     min_pixels=30):
-    """
-    Compare inside vs outside depth ONLY in regions near Canny edges.
-
-    seg         : (H, W) bool, SAM mask
-    depth       : (H, W) float
-    edges_bool  : (H, W) bool, Canny edges > 0
-    valid_mask  : optional (H, W) bool for valid depth
-    band_radius : thickness for inner/outer bands
-    edge_radius : radius to dilate edges (to capture nearby pixels)
-    min_pixels  : minimum pixels required in each band for reliable stats
-
-    Returns:
-        dict with median_inside, median_outside, delta, n_inside, n_outside
-        or None if not enough edge-aligned pixels.
-    """
-    if valid_mask is None:
-        valid_mask = np.isfinite(depth) & (depth > 0)
-
-    # Inner / outer bands around the mask
-    struct_band = np.ones((2*band_radius+1, 2*band_radius+1), dtype=bool)
-    inner = binary_erosion(seg, structure=struct_band, border_value=0)
-    outer = binary_dilation(seg, structure=struct_band, border_value=0) & ~seg
-
-    # Edge neighborhood
-    struct_edge = np.ones((2*edge_radius+1, 2*edge_radius+1), dtype=bool)
-    edges_dil = binary_dilation(edges_bool, structure=struct_edge)
-
-    # Restrict inner/outer to where edges exist
-    inner_on_edges = inner & edges_dil & valid_mask
-    outer_on_edges = outer & edges_dil & valid_mask
-
-    n_in  = inner_on_edges.sum()
-    n_out = outer_on_edges.sum()
-    if n_in < min_pixels or n_out < min_pixels:
-        return None  # not enough reliable info along edges
-
-    d_in  = depth[inner_on_edges]
-    d_out = depth[outer_on_edges]
-
-    med_in  = np.median(d_in)
-    med_out = np.median(d_out)
-    delta   = med_out - med_in  # > 0 ⇒ inside is closer than outside
-
-    return dict(
-        median_inside=med_in,
-        median_outside=med_out,
-        delta=delta,
-        n_inside=n_in,
-        n_outside=n_out
-    )
 
 def depth_edge_gradient_score(
     seg,
@@ -958,50 +973,6 @@ def depth_edge_gradient_score(
         n_pairs=len(jumps)
     )
 
-def score_sam_mask(mask_dict,
-                   depth,
-                   edges_bool,
-                   dt_edge,
-                   max_edge_dist=2,
-                   band_radius=2,
-                   edge_radius=1,
-                   min_pixels=30):
-    
-    seg = mask_dict['segmentation'].astype(bool)
-
-    # 1) Border alignment
-    border_cov, mean_dist = border_alignment_score(seg, dt_edge, max_dist=max_edge_dist)
-
-    # 2) Depth inside vs outside
-    depth_stats = depth_inside_outside_along_edges(
-        seg,
-        depth,
-        edges_bool,
-        band_radius=band_radius,
-        edge_radius=edge_radius,
-        min_pixels=min_pixels
-    )
-    if depth_stats is None:
-        return None
-
-    delta = depth_stats['delta']  # > 0 means inside is closer
-    if delta <= 0:
-        # not a foreground object (inside not closer than outside)
-        return None
-
-    # Final score: tune as you like
-    # - border_cov in [0,1]
-    # - fg in [0,1]
-    # - delta: meters (or whatever unit), compress via log so it doesn't explode
-    score = border_cov * np.log1p(delta)
-
-    return dict(
-        score=score,
-        border_coverage=border_cov,
-        mean_edge_dist=mean_dist,
-        depth_stats=depth_stats,
-    )
-
 def visualize_sam_masks(
     img,
     sam_masks,
@@ -1124,64 +1095,319 @@ def visualize_sam_masks(
     plt.tight_layout()
     plt.show()
 
-def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_results=False, save_path=None):
+def visualize_sam_masks_light(
+    img,
+    sam_masks,
+    alpha=0.2,
+    draw_bbox=True,
+    draw_points=True,
+    max_masks=None,
+    figsize=(6, 12//3),
+    suptitle="SAM Masks Visualization",
+    save_path=None,
+):
+    """
+    Visualize Segment Anything masks on top of an image.
 
-    # Step1: Edge detection from depth map
-    if config.ldi.masking.edges_detection.remove_depth_low_freq.apply:
-        depth, low_freq = remove_low_freq(depth_origin, config=config.ldi.masking.edges_detection.remove_depth_low_freq)
-        if plot_results:
-            visualize_low_freq_removal(depth_origin, low_freq, depth, save_path=save_path/"01_depth_lowfreq_removal.png")
-        depth = minmax_norm(depth, out_min=0.1, out_max=1.0)
+    Parameters
+    ----------
+    img : np.ndarray or PIL.Image
+        Original image. Shape (H, W, 3), uint8 or float in [0,1].
+    sam_masks : list of dict
+        Output of mask_generator.generate(img). Each dict must contain:
+        - 'segmentation' : bool array (H, W)
+        - 'bbox'         : [x, y, w, h]
+        - 'point_coords' : [[x, y], ...]
+    alpha : float
+        Transparency for mask overlay.
+    draw_bbox : bool
+        If True, draw bounding boxes for each mask.
+    draw_points : bool
+        If True, draw seed points used by SAM.
+    max_masks : int or None
+        If not None, only visualize the first `max_masks` masks.
+    figsize : tuple
+        Figure size for matplotlib.
+    """
+    # --- prepare image as numpy uint8 ---
+    if not isinstance(img, np.ndarray):
+        img = np.array(img)
+
+    if img.dtype != np.uint8:
+        # assume image is in [0,1] float or similar
+        img_vis = (255 * np.clip(img, 0, 1)).astype(np.uint8)
     else:
-        depth = depth_origin.copy()
+        img_vis = img.copy()
 
-    edges_canny, edges_sobel, depth_sharpened = get_canny_sobel_edges(
-        depth, img, 
-        edged_sobel_ksize=config.ldi.masking.edges_detection.sobel.ksize,
-        canny_low_t=config.ldi.masking.edges_detection.canny.low_t, 
-        canny_high_t=config.ldi.masking.edges_detection.canny.high_t, 
-        depth_sharpen_config=config.ldi.masking.edges_detection.depth_sharpening
-    )
-    if plot_results:
-        visualize_canny_sobel_edges(img, depth_origin, depth, depth_sharpened, edges_sobel, edges_canny, save_path=save_path/"02_canny_sobel_edges.png")
+    H, W = img_vis.shape[:2]
 
-    # Step2. Image segmentation with SAM
-    sam_masks = mask_generator.generate(img)
-    if plot_results:
-        visualize_sam_masks(img, sam_masks, alpha=0.5, suptitle="Detected SAM Masks", save_path=save_path/"03_detected_sam_masks.png")
+    # --- base and overlay canvas ---
+    overlay = img_vis.copy().astype(np.float32)
 
-    # Step3. Score & filter SAM masks based on depth edges
-    edges_bool = edges_canny.astype(bool)
-    # Distance (in pixels) from each pixel to nearest edge pixel
-    dt_edge = distance_transform_edt(~edges_bool)
+    # we’ll also build an outline-only image (optional)
+    outline = np.zeros_like(img_vis, dtype=np.uint8)
 
+    # Limit number of masks if desired
+    masks_to_use = sam_masks if max_masks is None else sam_masks[:max_masks]
+
+    for i, m in enumerate(masks_to_use):
+        seg = m["segmentation"]  # bool array (H, W)
+
+        # random color for this mask
+        color = np.array([
+            random.randint(0, 255),
+            random.randint(0, 255),
+            random.randint(0, 255)
+        ], dtype=np.float32)
+
+        # --- fill region: alpha-blend directly on overlay ---
+        mask_idx = seg.astype(bool)
+        overlay[mask_idx] = (1 - alpha) * overlay[mask_idx] + alpha * color
+
+        # --- optional: draw mask boundaries into outline image ---
+        # boundary = seg ^ cv2.erode(seg.astype(np.uint8), None).astype(bool)
+        seg_uint8 = seg.astype(np.uint8) * 255
+        # find edges by Canny or morphological gradient
+        edges = cv2.Canny(seg_uint8, 50, 150)
+        outline[edges > 0] = (0, 255, 0)  # green edges
+
+        # --- optional: draw bbox & seed points directly on overlay ---
+        if draw_bbox and "bbox" in m:
+            x, y, w, h = m["bbox"]
+            x2, y2 = x + w, y + h
+            cv2.rectangle(
+                overlay,
+                (int(x), int(y)),
+                (int(x2), int(y2)),
+                color=(255, 255, 255),
+                thickness=1,
+            )
+
+        if draw_points and "point_coords" in m:
+            for (px, py) in m["point_coords"]:
+                cv2.circle(
+                    overlay,
+                    (int(px), int(py)),
+                    radius=3,
+                    color=(255, 255, 255),
+                    thickness=-1,
+                )
+
+    overlay = overlay.astype(np.uint8)
+
+    # --- show original and overlay side-by-side ---
+    fig, axes = plt.subplots(1, 1, figsize=figsize)
+    fig.suptitle(suptitle)
+
+    axes.imshow(overlay)
+    axes.set_title("Masks overlay")
+    axes.axis("off")
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    plt.tight_layout()
+    plt.show()
+
+def filter_sam_masks_by_depth(
+    sam_masks,
+    depth,
+    *,
+    score_thresh,
+    use_median=False
+):
+    """
+    Filter SAM masks using mean/median depth.
+
+    Parameters
+    ----------
+    sam_masks : list of dict
+        SAM outputs, each containing a 'segmentation' key.
+    depth : (H, W) float
+        Rectified depth map.
+    score_thresh : float
+        Threshold on depth score (lower = closer = foreground).
+    use_median : bool
+        Whether to use median instead of mean depth.
+
+    Returns
+    -------
+    final_mask : (H, W) bool
+        Union of selected foreground masks.
+    candidates : list of (score, mask_dict)
+        Sorted candidate masks with scores.
+    """
     candidates = []
+
+    for m in sam_masks:
+        seg = m["segmentation"].astype(bool)
+        score = get_mask_score_via_hdistance_to_max_depth(
+            seg,
+            depth,
+            use_median=use_median
+        )
+        candidates.append((score, m))
+
+    # Sort from closest (foreground) to farthest
+    candidates.sort(key=lambda x: x[0])
+
+    selected_masks = [
+        m["segmentation"]
+        for score, m in candidates
+        if score < score_thresh
+    ]
+
+    if len(selected_masks) == 0:
+        final_mask = np.zeros_like(depth, dtype=bool)
+    else:
+        final_mask = np.any(np.stack(selected_masks, axis=-1), axis=-1)
+
+    return final_mask, candidates
+
+def filter_sam_masks_by_depth_edges(
+    sam_masks,
+    depth,
+    edges_canny,
+    *,
+    score_threshold,
+    max_edge_dist=1,
+    step_along_normal=1.0,
+    min_pairs=30,
+):
+    """
+    Filter SAM masks based on depth gradients across mask boundaries,
+    evaluated only along image edges.
+
+    Parameters
+    ----------
+    sam_masks : list of dict
+        SAM outputs, each containing a 'segmentation' key.
+    depth : (H, W) float
+        Depth map used for scoring (e.g., sharpened or raw).
+    edges_canny : (H, W) bool or uint8
+        Canny edge map.
+    score_threshold : float
+        Minimum score for a mask to be kept.
+    max_edge_dist : int
+        Allow boundary points within this pixel distance from edges.
+    step_along_normal : float
+        Step size (in pixels) along the boundary normal.
+    min_pairs : int
+        Minimum valid depth pairs required to score a mask.
+    plot_results : bool
+        Whether to visualize top-scoring masks.
+    img : optional image
+        Image used for visualization.
+    visualize_fn : callable, optional
+        Function to visualize SAM masks (e.g., visualize_sam_masks).
+
+    Returns
+    -------
+    final_mask : (H, W) bool
+        Union of selected foreground masks.
+    candidates : list of tuples
+        (score, mask_dict, score_details), sorted by descending score.
+    """
+    candidates = []
+
     for m in sam_masks:
         seg = m["segmentation"].astype(bool)
         s = depth_edge_gradient_score(
             seg,
-            depth_sharpened,   # or depth, depending on what you prefer
+            depth,
             edges_canny,
-            max_edge_dist=config.ldi.masking.segmask_scoring.max_edge_dist,   # allow boundary within 1px of edges
-            step_along_normal=config.ldi.masking.segmask_scoring.step_along_normal,
-            min_pairs=config.ldi.masking.segmask_scoring.min_pairs
+            max_edge_dist=max_edge_dist,
+            step_along_normal=step_along_normal,
+            min_pairs=min_pairs
         )
         if s is not None:
-            candidates.append((s['score'], m, s))
-    
+            candidates.append((s["score"], m, s))
+
+    # Sort from strongest foreground evidence to weakest
     candidates.sort(key=lambda x: x[0], reverse=True)
-    if plot_results and False:
-        top_masks = [m for _, m, _ in candidates[:50]]
-        visualize_sam_masks(img, top_masks, alpha=0.8, suptitle="Top 50 SAM Masks by Edge-Alignment Score")
 
-    selected_masks = [candidates[m][1]['segmentation'] for m in range(len(candidates)) if candidates[m][0] > config.ldi.masking.segmask_scoring.score_threshold]
-    final_mask = np.any(np.stack(selected_masks, axis=-1), axis=-1)
-    # print(f"Selected {len(selected_masks)} masks out of {len(candidates)} candidates with edge-alignment score > {config.ldi.masking.segmask_scoring.score_threshold}")
+    # Optional visualization
+
+    selected_masks = [
+        m["segmentation"]
+        for score, m, _ in candidates
+        if score > score_threshold
+    ]
+
+    if len(selected_masks) == 0:
+        final_mask = np.zeros_like(depth, dtype=bool)
+    else:
+        final_mask = np.any(np.stack(selected_masks, axis=-1), axis=-1)
+
+    return final_mask, candidates
+
+def get_foreground_segmask(config, mask_generator, img, depth_origin, plot_results=False, save_path=None):
+    # 0.generate SAM masks
+    sam_masks = mask_generator.generate(img)
     if plot_results:
-        visualize_sam_masks(img, [{"segmentation": final_mask}], alpha=0.8, max_masks=1, suptitle="Final Selected Mask after Edge-Alignment Filtering", save_path=save_path/"04_final_selected_mask.png")
+        print("0. Generating SAM masks...")
+        visualize_sam_masks(img, sam_masks, alpha=0.5, suptitle="Detected SAM Masks", save_path=save_path/"01_detected_sam_masks.png")
 
-    return final_mask
+
+    # I. Get Mask depth on mean depth
+    depth, low_freq = remove_low_freq(depth_origin, config=config.ldi.masking.depth_mean_based.remove_depth_low_freq)
+    if plot_results:
+        print("I. MASK VIA MEAN DEPTH: Removing low-frequency from depth for mean-depth based filtering...")
+        visualize_low_freq_removal(depth_origin, low_freq, depth, save_path=save_path/"02_depth_lowfreq_removal_hmax.png")  
+
+    final_mask_mean_depth, candidates = filter_sam_masks_by_depth(
+        sam_masks,
+        depth,
+        score_thresh=config.ldi.masking.depth_mean_based.segmask_scoring.score_threshold,
+        use_median=config.ldi.masking.depth_mean_based.segmask_scoring.use_median_depth
+    )
+    if plot_results:
+        print("I. MASK VIA MEAN DEPTH: Computing score and accumularing masks...")
+        visualize_sam_masks_light(img, [{"segmentation": final_mask_mean_depth}], alpha=0.8, max_masks=1, suptitle="Selected Mask after Mean-Depth Filtering", save_path=save_path/"03_mean_depth_selected_mask.png")
     
+    
+    # II. Get  Mask depth on depth edges
+    if config.ldi.masking.depth_edges_based.remove_depth_low_freq.apply:
+        depth, low_freq = remove_low_freq(depth_origin, config=config.ldi.masking.depth_edges_based.remove_depth_low_freq)
+        if plot_results:
+            print("II. MASK VIA DEPTH EDGES: Removing low-frequency from depth for depth-edges based filtering...")
+            visualize_low_freq_removal(depth_origin, low_freq, depth, save_path=save_path/"04_depth_lowfreq_removal_gaussian.png") 
+        depth = minmax_norm(depth, out_min=0.0, out_max=1.0)
+    else:
+        depth = depth_origin.copy()
+    
+    edges_canny, edges_sobel, depth_sharpened = get_canny_sobel_edges(
+        depth, img, 
+        edged_sobel_ksize=config.ldi.masking.depth_edges_based.edges_detection.sobel.ksize,
+        canny_low_t=config.ldi.masking.depth_edges_based.edges_detection.canny.low_t, 
+        canny_high_t=config.ldi.masking.depth_edges_based.edges_detection.canny.high_t, 
+        depth_sharpen_config=config.ldi.masking.depth_edges_based.edges_detection.depth_sharpening
+    )
+    if plot_results:
+        print("II. MASK VIA DEPTH EDGES: Computing Canny and Sobel edges from depth...")
+        visualize_canny_sobel_edges(img, depth_origin, depth, depth_sharpened, edges_sobel, edges_canny, save_path=save_path/"05_canny_sobel_edges.png")
+    
+    final_mask_depth_edges, candidates = filter_sam_masks_by_depth_edges(
+        sam_masks,
+        depth_sharpened,
+        edges_canny,
+        score_threshold=config.ldi.masking.depth_edges_based.segmask_scoring.score_threshold,
+        max_edge_dist=config.ldi.masking.depth_edges_based.segmask_scoring.max_edge_dist,
+        step_along_normal=config.ldi.masking.depth_edges_based.segmask_scoring.step_along_normal,
+        min_pairs=config.ldi.masking.depth_edges_based.segmask_scoring.min_pairs,
+    )
+    if plot_results:
+        print("II. MASK VIA DEPTH EDGES: Computing score and accumularing masks...")
+        visualize_sam_masks_light(img, [{"segmentation": final_mask_depth_edges}], alpha=0.8, max_masks=1, suptitle="Selected Mask after Edge-Alignment Filtering", save_path=save_path/"06_edge_aligned_selected_mask.png")
+    
+    # III. Combine both masks
+    final_mask = final_mask_mean_depth & final_mask_depth_edges
+   
+    if plot_results:
+        print("III. FINAL MASK: Combining both masks...")
+        visualize_sam_masks_light(img, [{"segmentation": final_mask}], alpha=0.8, max_masks=1, suptitle="Final Selected Mask", save_path=save_path/"07_final_selected_mask.png")
+    
+    return final_mask
 
 # STEP II: Double inpainting with LAMA and FLUX (copyright: LayerPano3D)
 def generate_caption(model, processor, raw_image):
@@ -1327,7 +1553,7 @@ def lama_flux_double_inpainting_p2(
         viz_kwargs["pano_flux_pil"] = inpaint_pano_flux_pil
         viz_lama_flux_double_inpainting(
             **viz_kwargs,
-            save_path=save_path/"05_lama_flux_double_inpainting.png",
+            save_path=save_path/"08_lama_flux_double_inpainting.png",
         )
 
     return inpaint_pano_flux_pil, mask_smooth_pil
@@ -1924,7 +2150,7 @@ def post_process_inpainted_depth(
         plt.tight_layout()
 
         if save_path is not None:
-            plt.savefig(save_path / "06_bring_bg_behind_fg.png", dpi=150)
+            plt.savefig(save_path / "09_bring_bg_behind_fg.png", dpi=150)
 
         plt.show()
 
@@ -1993,6 +2219,9 @@ def visualize_depth_inpainting(
     depth_inpainted_hblending=None,
     depth_inpainted_hblending_pp=None,
 
+    depth_inpainted_hminprior=None,          # NEW
+    depth_inpainted_hminprior_pp=None,       # NEW
+
     depth_inpainted_infusion=None,
     depth_inpainted_infusion_pp=None,
 
@@ -2035,7 +2264,6 @@ def visualize_depth_inpainting(
             arr = arr.astype(np.float32) / 255.0
         else:
             arr = arr.astype(np.float32)
-            # assume already [0,1] if float
             if arr.max() > 1.0:
                 arr = arr / 255.0
         return np.clip(arr, 0.0, 1.0)
@@ -2050,11 +2278,7 @@ def visualize_depth_inpainting(
         return d
 
     def _overlay_mask_rgb(rgb01, mask, alpha=0.35):
-        """
-        Blue overlay on rgb01 where mask==True.
-        rgb01: (H,W,3) float in [0,1]
-        mask : (H,W) bool
-        """
+        """Blue overlay on rgb01 where mask==True."""
         if rgb01 is None or mask is None:
             return rgb01
         out = rgb01.copy()
@@ -2081,7 +2305,6 @@ def visualize_depth_inpainting(
 
     mask = None
     if inpaint_mask_pil is not None:
-        # expecting your helper
         if isinstance(inpaint_mask_pil, Image.Image):
             mask = my_utils.pil_mask_to_numpy_bool(inpaint_mask_pil)
         mask = np.asarray(inpaint_mask_pil, dtype=bool)
@@ -2092,6 +2315,9 @@ def visualize_depth_inpainting(
 
     d_hb    = _as_depth(depth_inpainted_hblending)
     d_hb_pp = _as_depth(depth_inpainted_hblending_pp)
+
+    d_hmin    = _as_depth(depth_inpainted_hminprior)     # NEW
+    d_hmin_pp = _as_depth(depth_inpainted_hminprior_pp)  # NEW
 
     d_inf    = _as_depth(depth_inpainted_infusion)
     d_inf_pp = _as_depth(depth_inpainted_infusion_pp)
@@ -2104,18 +2330,24 @@ def visualize_depth_inpainting(
 
     # Infer (H,W) from anything available (needed for consistency checks)
     hw = None
-    for candidate in [d0, d0_pp, d_hb, d_hb_pp, d_inf, d_inf_pp, d_nn, d_nn_pp, d_bl, d_bl_pp]:
+    for candidate in [
+        d0, d0_pp,
+        d_hb, d_hb_pp,
+        d_hmin, d_hmin_pp,   # NEW
+        d_inf, d_inf_pp,
+        d_nn, d_nn_pp,
+        d_bl, d_bl_pp
+    ]:
         if candidate is not None:
             hw = candidate.shape
             break
-    if hw is None:
-        # No depth at all; we may still show RGB rows if provided.
-        pass
-    else:
+
+    if hw is not None:
         # Ensure all provided depths share same shape
         for name, candidate in [
             ("depth_origin", d0), ("depth_origin_pp", d0_pp),
             ("depth_hblending", d_hb), ("depth_hblending_pp", d_hb_pp),
+            ("depth_hminprior", d_hmin), ("depth_hminprior_pp", d_hmin_pp),  # NEW
             ("depth_infusion", d_inf), ("depth_infusion_pp", d_inf_pp),
             ("depth_nn", d_nn), ("depth_nn_pp", d_nn_pp),
             ("depth_bilinear_nn", d_bl), ("depth_bilinear_nn_pp", d_bl_pp),
@@ -2123,15 +2355,11 @@ def visualize_depth_inpainting(
             if candidate is not None and candidate.shape != hw:
                 raise ValueError(f"{name} has shape {candidate.shape} but expected {hw}")
 
-        # Also make sure mask aligns if present
         if mask is not None and mask.shape != hw:
             raise ValueError(f"mask has shape {mask.shape} but expected {hw}")
 
     # -----------------------------
     # 2) Build rows dynamically
-    # Each row spec:
-    #   ("title", raw_img, pp_img, third_img, kind)
-    # kind in {"rgb","depth"}
     # -----------------------------
     rows = []
 
@@ -2141,10 +2369,10 @@ def visualize_depth_inpainting(
     if inpaint_rgb is not None:
         rows.append(("Inpainted RGB", inpaint_rgb, inpaint_rgb, _overlay_mask_rgb(inpaint_rgb, mask), "rgb"))
 
-    # Depth rows: we want raw/pp/third depending on what's available
     depth_pairs = [
         ("Depth origin", d0, d0_pp),
         ("Depth (H-blending)", d_hb, d_hb_pp),
+        ("Depth (H-min prior)", d_hmin, d_hmin_pp),  # NEW
         ("Depth (Infusion)", d_inf, d_inf_pp),
         ("Depth (Nearest)", d_nn, d_nn_pp),
         ("Depth (Bilinear+NN)", d_bl, d_bl_pp),
@@ -2154,22 +2382,13 @@ def visualize_depth_inpainting(
         if raw is None and pp is None:
             continue
 
-        # col0: raw if exists else pp
         col0 = raw if raw is not None else pp
-
-        # col1: pp if exists else raw (keep the "pp" slot filled with something)
         col1 = pp if pp is not None else raw
 
-        # col2:
-        #  - best: blended (needs d0 + pp + mask)
-        #  - else: show pp (or raw) as RGB with mask overlay if mask exists
-        #  - else: just show pp (or raw)
-        col2 = None
         if (d0 is not None) and (pp is not None) and (mask is not None):
             col2 = _blend_depth(d0, pp, mask)
         elif (mask is not None):
-            # we will overlay mask on a colormapped version later
-            col2 = col1
+            col2 = col1  # overlay later
         else:
             col2 = col1
 
@@ -2179,7 +2398,7 @@ def visualize_depth_inpainting(
         raise ValueError("Nothing to plot: provide at least one RGB or depth argument.")
 
     # -----------------------------
-    # 3) Shared depth colormap + normalization (global over all plotted depth images)
+    # 3) Shared depth colormap + normalization
     # -----------------------------
     depth_for_norm = []
     for _, c0, c1, c2, kind in rows:
@@ -2212,13 +2431,11 @@ def visualize_depth_inpainting(
     fig, axes = plt.subplots(nrows, ncols, figsize=(fig_w, fig_h))
     axes = np.atleast_2d(axes)
 
-    # Column titles
     col_titles = ["Raw", "Post-processed", "PP + mask (or blended)"]
     for j in range(ncols):
         axes[0, j].set_title(col_titles[j], fontsize=12)
 
     for i, (title, c0, c1, c2, kind) in enumerate(rows):
-        # Row label on left subplot
         axes[i, 0].text(
             0.01, 1.02, title, transform=axes[i, 0].transAxes,
             fontsize=12, fontweight="bold", va="bottom"
@@ -2228,17 +2445,12 @@ def visualize_depth_inpainting(
             axes[i, 0].imshow(c0)
             axes[i, 1].imshow(c1)
             axes[i, 2].imshow(c2 if c2 is not None else c1)
-
             _off(axes[i, 0]); _off(axes[i, 1]); _off(axes[i, 2])
-
         else:
-            # Depth: use shared cmap/norm
-            im0 = axes[i, 0].imshow(c0, cmap=cmap, norm=norm)
+            axes[i, 0].imshow(c0, cmap=cmap, norm=norm)
             axes[i, 1].imshow(c1, cmap=cmap, norm=norm)
 
-            # Third column: either blended depth (already depth), or pp with mask overlay
             if (mask is not None) and (c2 is c1):
-                # Overlay on colormapped depth to keep identical colormap
                 rgb = depth_to_rgb(c2)
                 axes[i, 2].imshow(_overlay_mask_rgb(rgb, mask))
             else:
@@ -2247,7 +2459,6 @@ def visualize_depth_inpainting(
             _off(axes[i, 0]); _off(axes[i, 1]); _off(axes[i, 2])
 
     fig.suptitle(suptitle, fontsize=16)
-
     plt.tight_layout()
     if save_path is not None:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -2441,8 +2652,8 @@ def visualize_depth_inpainting_(
 
 if __name__ == "__main__":
     config, img_name = my_utils.fetch_config_via_parser(
-        debug=False, 
-        debug_parser_override=["--config", "Antoine/F0_forest.yaml"],
+        debug=True, 
+        debug_parser_override=["--config", "Antoine/ldi.yaml"],
         return_img_name=True
     )
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
@@ -2454,18 +2665,20 @@ if __name__ == "__main__":
         depth_model=config.depth_model,
     )
 
-    # img_name = "FI1"
+    img_name = "FD0"
     data_dir= "/home/a.schnepf/phd/SphericalDreamer/OUTPUTS"
     depth_path = f"{data_dir}/gen_depths_bckp/{img_name}.npy"
     image_path = f"{data_dir}/gen_images_bckp/{img_name}.png"  # or .jpg
-    depth_origin = np.load(depth_path)
-    img = my_utils.PIL_to_numpy(Image.open(image_path))
-    plot_results = True
-    shortcut_I_and_II = False
-    savedir =f"tests/ldi/{img_name}"
+    depth_origin = my_utils.depth_resize(np.load(depth_path), height, width)
+    img = my_utils.opencv_resize( my_utils.PIL_to_numpy(Image.open(image_path)), height, width, mode="bilinear")
+    plot_results = False
+    shortcut_I = False
+    shortcut_II = False
+    shortcut_III = True
+    savedir = Path(f"OUTPUTS/ldi_tests/{img_name}")
     os.makedirs(savedir, exist_ok=True)
 
-    if not shortcut_I_and_II:
+    if not shortcut_I:
         # -----------------------------------------
         # I. COMPUTE SEGMAP FOR FORGROUND OBJECTS
         # -----------------------------------------
@@ -2476,11 +2689,13 @@ if __name__ == "__main__":
             img,
             depth_origin,
             plot_results=plot_results,
+            save_path=savedir
         )
         del sam
         del mask_generator
         torch.cuda.empty_cache()
-        
+    
+    if not shortcut_II:
         # --------------------------------
         # II. INPAINTING WITH LAMA + FLUX
         # --------------------------------
@@ -2507,158 +2722,40 @@ if __name__ == "__main__":
             inpaint_pano_lama_pil,
             viz_kwargs,
             plot_results=plot_results,
+            save_path=savedir,
         )
 
         spherical_dreamer._release_flux_inpainting_memory()
         torch.cuda.empty_cache()
 
-        depth_360_mono = spherical_dreamer.estimate_pano_depth(inpaint_pano_pil)
+        # depth_360_mono = spherical_dreamer.estimate_pano_depth(inpaint_pano_pil)
         # -- debugging save time code ---
         current_variables = {
             'inpaint_pano_pil' : inpaint_pano_pil,
             'inpaint_mask_pil' : inpaint_mask_pil,
-            'depth_360_mono' : depth_360_mono
+            'final_mask_loose' : final_mask_loose,
+            # 'depth_360_mono' : depth_360_mono
         }
         with open(os.path.join(savedir, "tmp_inpaint_data.pkl"), "wb") as f:
             pickle.dump(current_variables, f)
+    
+    # New simpler depth inpainting
     with open(os.path.join(savedir, "tmp_inpaint_data.pkl"), "rb") as f:
         loaded_variables = pickle.load(f)
 
+
     inpaint_pano_pil = loaded_variables['inpaint_pano_pil']
     inpaint_mask_pil = loaded_variables['inpaint_mask_pil']
-    depth_360_mono = loaded_variables['depth_360_mono']
-    # -- end of debugging save time code ---
-
     
-    # -------------------------------------------------
-    # III. DEPTH INPAINTING (at resolution 1024 * 2048)
-    # -------------------------------------------------
-    pipe_dp = instanciate_pipe_dp()
-
-    img_pil, depth_origin, inpaint_mask_pil_, inpaint_mask_bool_ = prepare_inpainting(
+    img_pil, depth_origin, _, _ = prepare_inpainting(
         config,
         img,
         depth_origin,
         inpaint_mask_pil,
     )
-    # Inpainting begins.... 
+    _, depth_prior = remove_low_freq(depth_origin, config=config.ldi.masking.depth_mean_based.remove_depth_low_freq)
+    inpaint_mask_bool_ = np.ones_like(depth_prior, dtype=bool)
 
-    # hblending
-    inpaint_pano = np.array(inpaint_pano_pil) / 255.0
-    _, _, _, depth_inpainted_hblending = harmonic_blend_of_depths(
-        colors=inpaint_pano, 
-        warped_depth_interp=depth_origin, #gt depth
-        depth_estimated=depth_360_mono, # new depth
-        missing_info_mask=inpaint_mask_bool_,
-        pose= np.eye(4).astype(np.float32),
-        sphere_radius=1.0,
-        height=inpaint_pano.shape[0],
-        width=inpaint_pano.shape[1],
-        logging=plot_results, 
-        where_save=savedir,
-    )
-    if config.ldi.depth_inpainting.apply_post_processing:
-        depth_inpainted_hblending_pp = post_process_inpainted_depth(
-            depth_bg=depth_inpainted_hblending,
-            depth_fg=depth_origin,
-            bg_mask=inpaint_mask_bool_,
-            plot=plot_results,
-        )
-    else:
-        depth_inpainted_hblending_pp = depth_inpainted_hblending
-
-    # infusion
-    depth_inpainted_infusion = inpaint_bg_depth_infusion(
-        image=img_pil,
-        depth=depth_origin,
-        image_bg=inpaint_pano_pil,
-        bg_mask=inpaint_mask_pil_,
-        pipe_dp=pipe_dp,
-        rescale_to_min_depth=False,
-        plot_results=plot_results,
-        pad_width=config.ldi.depth_inpainting.pad_width,
-    )
-    if config.ldi.depth_inpainting.apply_post_processing:
-        depth_inpainted_infusion_pp = post_process_inpainted_depth(
-            depth_bg=depth_inpainted_infusion,
-            depth_fg=depth_origin,
-            bg_mask=inpaint_mask_bool_,
-            plot=plot_results,
-        )
-    else:
-        depth_inpainted_infusion_pp = depth_inpainted_infusion
-
-    # simple interpolations
-    depth_inpainted_nn = interpolate_depth_nearest(
-        depth=depth_origin,
-        bg_mask=inpaint_mask_bool_,
-        pad_width=config.ldi.depth_inpainting.pad_width,
-    )
-    if config.ldi.depth_inpainting.apply_post_processing:
-        depth_inpainted_nn_pp = post_process_inpainted_depth(
-            depth_bg=depth_inpainted_nn,
-            depth_fg=depth_origin,
-            bg_mask=inpaint_mask_bool_,
-            plot=plot_results,
-        )
-    else:
-        depth_inpainted_nn_pp = depth_inpainted_nn
-
-    depth_inpainted_bilinear_nn = interpolate_depth_bilinear_plus_nn(
-        depth=depth_origin,
-        bg_mask=inpaint_mask_bool_,
-        pad_width=config.ldi.depth_inpainting.pad_width,
-    )
-    if config.ldi.depth_inpainting.apply_post_processing:
-        depth_inpainted_bilinear_nn_pp = post_process_inpainted_depth(
-            depth_bg=depth_inpainted_bilinear_nn,
-            depth_fg=depth_origin,
-            bg_mask=inpaint_mask_bool_,
-            plot=plot_results,
-        )
-    else:
-        depth_inpainted_bilinear_nn_pp = depth_inpainted_bilinear_nn
-        
-    del pipe_dp
-    torch.cuda.empty_cache()
-
-    if config.ldi.depth_inpainting.apply_post_processing:
-        depth_origin_pp = post_process_inpainted_depth(
-            depth_bg=depth_origin,
-            depth_fg=depth_origin,
-            bg_mask=inpaint_mask_bool_,
-        )
-    else:
-        depth_origin_pp = depth_origin
-
-    suptitle=f""" == Depth Inpainting Results == 
-    Additionnal mask dilation: {config.ldi.depth_inpainting.additionnal_mask_dilation_px} px
-    Fill holes: {config.ldi.depth_inpainting.fill_holes}
-    Depth padding width: {config.ldi.depth_inpainting.pad_width} px
-    """ 
-    print(suptitle)
-    visualize_depth_inpainting(
-        img_pil,
-        inpaint_pano_pil,
-        inpaint_mask_pil_,
-        depth_origin,
-        depth_origin_pp,
-        depth_inpainted_hblending,
-        depth_inpainted_hblending_pp,
-        depth_inpainted_infusion,
-        depth_inpainted_infusion_pp,
-        depth_inpainted_nn,
-        depth_inpainted_nn_pp,
-        depth_inpainted_bilinear_nn,
-        depth_inpainted_bilinear_nn_pp,
-        suptitle=suptitle,
-        save_path=f"{savedir}/main-viz.png"
-    )
-
-
-    # all numpy
-    # images PIL uint
-    # depth in [0,1] numpy
     np.savez(
         f"{savedir}/{img_name}_o3d_local_viz_data.npz",
 
@@ -2668,13 +2765,167 @@ if __name__ == "__main__":
 
         # Background image & mask
         my_new_bg=inpaint_pano_pil,
-        my_new_bg_mask=my_utils.pil_mask_to_numpy_bool(inpaint_mask_pil_),
+        my_new_bg_mask=inpaint_mask_bool_,
 
-        depth_infusion=depth_inpainted_infusion_pp,
-        depth_nearest=depth_inpainted_nn_pp,
-        depth_bilinear_nn=depth_inpainted_bilinear_nn_pp,
-        depth_hblending=depth_inpainted_hblending_pp,
+        depth_prior=depth_prior,
     )
+
+    if not shortcut_III:
+        with open(os.path.join(savedir, "tmp_inpaint_data.pkl"), "rb") as f:
+            loaded_variables = pickle.load(f)
+
+        inpaint_pano_pil = loaded_variables['inpaint_pano_pil']
+        inpaint_mask_pil = loaded_variables['inpaint_mask_pil']
+        depth_360_mono = loaded_variables['depth_360_mono']
+        final_mask_loose = loaded_variables['final_mask_loose']
+        # -- end of debugging save time code ---
+
+        # -------------------------------------------------
+        # III. DEPTH INPAINTING (at resolution 1024 * 2048)
+        # -------------------------------------------------
+        pipe_dp = instanciate_pipe_dp()
+
+        img_pil, depth_origin, inpaint_mask_pil_, inpaint_mask_bool_ = prepare_inpainting(
+            config,
+            img,
+            depth_origin,
+            inpaint_mask_pil,
+        )
+        # Inpainting begins.... 
+
+        # hblending
+        inpaint_pano = np.array(inpaint_pano_pil) / 255.0
+        _, _, _, depth_inpainted_hblending = harmonic_blend_of_depths(
+            colors=inpaint_pano, 
+            warped_depth_interp=depth_origin, #gt depth
+            depth_estimated=depth_360_mono, # new depth
+            missing_info_mask=inpaint_mask_bool_,
+            pose= np.eye(4).astype(np.float32),
+            sphere_radius=1.0,
+            height=inpaint_pano.shape[0],
+            width=inpaint_pano.shape[1],
+            phase="1",
+            logging=plot_results, 
+            where_save=savedir,
+        )
+        if config.ldi.depth_inpainting.apply_post_processing:
+            depth_inpainted_hblending_pp = post_process_inpainted_depth(
+                depth_bg=depth_inpainted_hblending,
+                depth_fg=depth_origin,
+                bg_mask=inpaint_mask_bool_,
+                plot=plot_results,
+            )
+        else:
+            depth_inpainted_hblending_pp = depth_inpainted_hblending
+
+        # infusion
+        depth_inpainted_infusion = inpaint_bg_depth_infusion(
+            image=img_pil,
+            depth=depth_origin,
+            image_bg=inpaint_pano_pil,
+            bg_mask=inpaint_mask_pil_,
+            pipe_dp=pipe_dp,
+            rescale_to_min_depth=False,
+            plot_results=plot_results,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+        if config.ldi.depth_inpainting.apply_post_processing:
+            depth_inpainted_infusion_pp = post_process_inpainted_depth(
+                depth_bg=depth_inpainted_infusion,
+                depth_fg=depth_origin,
+                bg_mask=inpaint_mask_bool_,
+                plot=plot_results,
+            )
+        else:
+            depth_inpainted_infusion_pp = depth_inpainted_infusion
+
+        # simple interpolations
+        depth_inpainted_nn = interpolate_depth_nearest(
+            depth=depth_origin,
+            bg_mask=inpaint_mask_bool_,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+        if config.ldi.depth_inpainting.apply_post_processing:
+            depth_inpainted_nn_pp = post_process_inpainted_depth(
+                depth_bg=depth_inpainted_nn,
+                depth_fg=depth_origin,
+                bg_mask=inpaint_mask_bool_,
+                plot=plot_results,
+            )
+        else:
+            depth_inpainted_nn_pp = depth_inpainted_nn
+
+        depth_inpainted_bilinear_nn = interpolate_depth_bilinear_plus_nn(
+            depth=depth_origin,
+            bg_mask=inpaint_mask_bool_,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+        if config.ldi.depth_inpainting.apply_post_processing:
+            depth_inpainted_bilinear_nn_pp = post_process_inpainted_depth(
+                depth_bg=depth_inpainted_bilinear_nn,
+                depth_fg=depth_origin,
+                bg_mask=inpaint_mask_bool_,
+                plot=plot_results,
+            )
+        else:
+            depth_inpainted_bilinear_nn_pp = depth_inpainted_bilinear_nn
+            
+        del pipe_dp
+        torch.cuda.empty_cache()
+
+        if config.ldi.depth_inpainting.apply_post_processing:
+            depth_origin_pp = post_process_inpainted_depth(
+                depth_bg=depth_origin,
+                depth_fg=depth_origin,
+                bg_mask=inpaint_mask_bool_,
+            )
+        else:
+            depth_origin_pp = depth_origin
+
+        suptitle=f""" == Depth Inpainting Results == 
+        Additionnal mask dilation: {config.ldi.depth_inpainting.additionnal_mask_dilation_px} px
+        Fill holes: {config.ldi.depth_inpainting.fill_holes}
+        Depth padding width: {config.ldi.depth_inpainting.pad_width} px
+        """ 
+        print(suptitle)
+        visualize_depth_inpainting(
+            img_pil,
+            inpaint_pano_pil,
+            inpaint_mask_pil_,
+            depth_origin,
+            depth_origin_pp,
+            depth_inpainted_hblending,
+            depth_inpainted_hblending_pp,
+            depth_inpainted_infusion,
+            depth_inpainted_infusion_pp,
+            depth_inpainted_nn,
+            depth_inpainted_nn_pp,
+            depth_inpainted_bilinear_nn,
+            depth_inpainted_bilinear_nn_pp,
+            suptitle=suptitle,
+            save_path=f"{savedir}/main-viz.png"
+        )
+
+
+        # all numpy
+        # images PIL uint
+        # depth in [0,1] numpy
+        np.savez(
+            f"{savedir}/{img_name}_o3d_local_viz_data.npz",
+
+            # Original image + depth
+            my_original_image=img_pil,
+            my_original_depth=depth_origin,  # already inverted
+
+            # Background image & mask
+            my_new_bg=inpaint_pano_pil,
+            my_new_bg_mask=my_utils.pil_mask_to_numpy_bool(inpaint_mask_pil_),
+
+            depth_infusion=depth_inpainted_infusion_pp,
+            depth_nearest=depth_inpainted_nn_pp,
+            depth_bilinear_nn=depth_inpainted_bilinear_nn_pp,
+            depth_hblending=depth_inpainted_hblending_pp,
+        )
 
 
 # TODO: (Antoine, 8 decembre) Anytime the depth is resized, we need to check how it is done, as it could cause "trails" artefacts in the 3D world is bilinear is used

@@ -12,3 +12,4 @@ temp_run_nerfstudio.sh
 cuda_installer.pyz
 driver_installer.run
 Figures
+viz_ply_pointclouds

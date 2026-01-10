@@ -1,0 +1,12 @@
+expname: Volcanic
+prompt: A harsh volcanic environment shaped by intense geological activity, featuring jagged rock formations, hardened lava flows, ash-covered ground, and glowing fissures in the earth.
+
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null #TODO: implemtement this
+
+
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp1

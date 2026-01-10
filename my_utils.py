@@ -315,13 +315,9 @@ def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=F
     config = Prodict.from_dict(
         load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml")
     )
-
-    # Apply overrides
-    for k, v in _collect_overrides(unknown):
-        set_by_dotted_path_strict(config, k, v)
-
     if return_img_name:
         return config, args.img_name
+
     return config
 
 # Note: This is the old fetch_config_via_parser without override functionality
@@ -466,9 +462,9 @@ def mask_resize(mask, new_h, new_w):
     """Resize a binary mask using nearest neighbor interpolation."""
     return opencv_resize(mask.astype(np.uint8), new_h, new_w, mode="nearest").astype(bool)
 
-def resize_depth():
-   #TODO
-   pass
+def depth_resize(depth, new_h, new_w):
+    """Resize a depth map using bilinear interpolation."""
+    return opencv_resize(depth.astype(np.float32), new_h, new_w, mode="bilinear")
 
 # ---------------------------- #
 # ------ Visualization ------- #
@@ -615,6 +611,7 @@ def depth_to_pil(depth, cmap_name="plasma", vmin=None, vmax=None):
     depth_color = (depth_color * 255).astype(np.uint8)
 
     return Image.fromarray(depth_color)
+
 # ------------------------------------------ #
 # ----- Numpy - PIL conversions / utils -----#
 # ------------------------------------------ #

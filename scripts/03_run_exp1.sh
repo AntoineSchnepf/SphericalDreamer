@@ -12,16 +12,17 @@ fi
 
 # Define array of configs
 configs=(
-    exp0/caverns.yaml
-    exp0/cityscape.yaml
-    exp0/desert.yaml
-    exp0/highland.yaml
-    exp0/plains.yaml
-    exp0/ruins.yaml
-    exp0/stronghold.yaml
-    exp0/tundra.yaml
-    exp0/volcanic.yaml
-    exp0/wetland.yaml
+    exp1/caverns.yaml
+    exp1/cityscape.yaml
+    exp1/desert.yaml
+    exp1/highland.yaml
+    exp1/plains.yaml
+    exp1/ruins.yaml
+    exp1/stronghold.yaml
+    exp1/tundra.yaml
+    exp1/volcanic.yaml
+    exp1/wetland.yaml
+    exp1/forest.yaml
 )
 
 # Run experiments

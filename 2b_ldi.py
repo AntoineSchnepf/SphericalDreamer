@@ -173,7 +173,7 @@ if __name__ == "__main__":
             # -------------------------------------------------
             t0 = time.time()
             list_depth_inpainted = []
-            list_list_inpaint_resized = []
+            list_mask_inpaint_resized = []
             list_depth_origin_resized = []
             list_img_pil_resized = []
             # preparation
@@ -183,17 +183,19 @@ if __name__ == "__main__":
             for i in range(1, config.num_dreams):
                 printc(f"--- {_phase_current}: Depth Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
 
-                img_pil, depth_origin, inpaint_mask_pil_, inpaint_mask_bool_ = ldi.prepare_inpainting(
+                img_pil, depth_origin, _, inpaint_mask_bool_ = ldi.prepare_inpainting(
                     config,
                     list_img[i-1],
                     list_depth_origin[i-1],
                     list_inpaint_mask_pil[i-1],
                 )
-                list_list_inpaint_resized.append(inpaint_mask_bool_)
-                list_depth_origin_resized.append(depth_origin)
-                list_img_pil_resized.append(img_pil)
 
-                if config.ldi.depth_inpainting.method == "harmonic_blending":
+                if config.ldi.depth_inpainting.method == "horizontal_min_prior":
+                    _, depth_prior = ldi.remove_low_freq(depth_origin, config=config.ldi.masking.depth_mean_based.remove_depth_low_freq)
+                    inpaint_mask_bool_ = np.ones_like(inpaint_mask_bool_, dtype=bool)  # in this method, we inpaint everywhere
+                    depth_inpainted = depth_prior
+
+                elif config.ldi.depth_inpainting.method == "harmonic_blending":
                         depth_360_mono = spherical_dreamer.estimate_pano_depth(inpaint_pano_pil)
                         inpaint_pano = np.array(inpaint_pano_pil) / 255.0
                         _, _, _, depth_inpainted_hblending = harmonic_blend_of_depths(
@@ -250,6 +252,9 @@ if __name__ == "__main__":
                         save_path=get_save_viz_path(i),
                     )
                 list_depth_inpainted.append(depth_inpainted)
+                list_mask_inpaint_resized.append(inpaint_mask_bool_)
+                list_depth_origin_resized.append(depth_origin)
+                list_img_pil_resized.append(img_pil)
 
             if config.ldi.depth_inpainting.method == "infusion":
                 del pipe_dp
@@ -258,7 +263,9 @@ if __name__ == "__main__":
 
             # SAVE RESULTS
             for i in range(1, config.num_dreams):
-                if config.ldi.depth_inpainting.method == "harmonic_blending":
+                if config.ldi.depth_inpainting.method == "horizontal_min_prior":
+                    suffix="hminprior"
+                elif config.ldi.depth_inpainting.method == "harmonic_blending":
                     suffix="hblending"
                 elif config.ldi.depth_inpainting.method == "infusion":
                     suffix="infusion"
@@ -270,19 +277,19 @@ if __name__ == "__main__":
                 kwargs = {
                     "img_pil": list_img_pil_resized[i-1],
                     "inpaint_pano_pil": list_inpaint_pano_pil[i-1],
-                    "inpaint_mask_pil": list_list_inpaint_resized[i-1],
+                    "inpaint_mask_pil": list_mask_inpaint_resized[i-1],
                     "depth_origin": list_depth_origin_resized[i-1],
                     f"depth_inpainted_{suffix}": list_depth_inpainted[i-1]
                 }
                 ldi.visualize_depth_inpainting(
                     **kwargs,
-                    save_path= get_save_viz_path(i) / "07_depth_inpainting_visualization.png",
+                    save_path= get_save_viz_path(i) / "10_depth_inpainting_visualization.png",
                 )
 
                 my_utils.save_rgbd_ldi_pano(
                     pano_rgb_bg=list_inpaint_pano_pil[i-1],
                     depth_bg=list_depth_inpainted[i-1],
-                    mask_bg=my_utils.pil_mask_to_numpy_bool(list_inpaint_mask_pil[i-1]),
+                    mask_bg=list_mask_inpaint_resized[i-1],
                     dream=i,
                     save_dir_=save_dir_,
                     phase=_phase_current,

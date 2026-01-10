@@ -11,7 +11,7 @@ load_phase3_from: null #TODO: implemtement this
 
 
 # ----- main args  -----
-num_dreams: 4
+num_dreams: 5
 prompt: "default prompt"
 width: 1440
 height: 720
@@ -38,26 +38,6 @@ world_opening:
 
 ldi: # layered depth image
   masking:
-    edges_detection:
-      remove_depth_low_freq:
-        apply: True
-        method: gaussian # 'gaussian' or 'fourier'
-        fourier:
-          cutoff_frac: 0.01
-        gaussian:
-          sigma_v: 50.0
-          sigma_h: 50.0
-      canny:
-        low_t: 35
-        high_t: 90
-      sobel:
-        ksize: 3
-      depth_sharpening:
-        apply: False
-        filter_size: 5          
-        depth_threshold: 0.01   
-        sigma_s: 3.0            
-        sigma_r: 0.1            
     segmask_detection: # parameters for SAM mask generation
       points_per_side: 32 # was 16
       pred_iou_thresh: 0.5 
@@ -65,11 +45,45 @@ ldi: # layered depth image
       crop_n_layers: 0
       crop_n_points_downscale_factor: 0
       min_mask_region_area: 20 
-    segmask_scoring:
-      score_threshold: 0.02
-      max_edge_dist: 0 # tested 1: should be 0
-      step_along_normal: 1.0
-      min_pairs: 10 # was 30
+
+    depth_mean_based:
+      remove_depth_low_freq:
+        method: hmax # use hmax here
+        hmax:
+          smooth_v: null
+      segmask_scoring:
+        score_threshold: -0.1
+        use_median_depth: False   
+
+    depth_edges_based:       
+      remove_depth_low_freq:
+          apply: True
+          method: gaussian # 'gaussian' or 'fourier'. Don't use hmax here.
+          fourier:
+            cutoff_frac: 0.01
+          gaussian:
+            sigma_v: 50.0
+            sigma_h: 50.0
+
+      edges_detection:
+        canny:
+          low_t: 35
+          high_t: 90
+        sobel:
+          ksize: 3
+        depth_sharpening:
+          apply: False
+          filter_size: 5          
+          depth_threshold: 0.01   
+          sigma_s: 3.0            
+          sigma_r: 0.1            
+
+      segmask_scoring:
+        score_threshold: 0.02
+        use_median_depth: False
+        max_edge_dist: 0 # tested 1: should be 0
+        step_along_normal: 1.0
+        min_pairs: 10 # was 30
   inpainting:
     mask_dilatation_px: 10
     strength: 0.6
@@ -80,11 +94,11 @@ ldi: # layered depth image
       height: 512
       width: 1024
   depth_inpainting:
-    method: bilinear_plus_nn # 'harmonic_blending', 'infusion', 'nearest' or 'bilinear_plus_nn'
+    method: horizontal_min_prior # 'horizontal_min_prior', 'harmonic_blending', 'infusion', 'nearest' or 'bilinear_plus_nn'
     additionnal_mask_dilation_px: 0
-    fill_holes: True
+    fill_holes: False
+    apply_post_processing: False
     pad_width: 150
-    apply_post_processing: True
   save_plots: True
   
 phase1: # panorama generation
@@ -228,8 +242,6 @@ phase5v2:
       max_y: 0.2
       min_z: -0.1
       max_z: 0.3
-
-  
 
 phase6: # train splatfacto
   near_plane: 0.08

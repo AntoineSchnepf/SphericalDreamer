@@ -31,3 +31,7 @@ python3 3_fix_world_geometry.py --config $config_name
 # 4. Render video
 echo Running 4_render_video.py...
 python3 4_render_video.py --config $config_name
+
+# 5. Render blender
+echo Running 5_render_blender.py...
+python3 5v2_render_blender.py --config $config_name
