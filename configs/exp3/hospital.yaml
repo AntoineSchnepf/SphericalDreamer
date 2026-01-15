@@ -1,0 +1,11 @@
+expname: hospital
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 5
+prompt: An abandoned hospital interior with long corridors, tiled floors, flickering
+  fluorescent lights, medical equipment, eerie atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp3/

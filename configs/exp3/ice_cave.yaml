@@ -1,0 +1,11 @@
+expname: ice_cave
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 5
+prompt: An ice cave interior with translucent blue ice walls, frozen textures, soft
+  diffused light, cold and otherworldly atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp3/

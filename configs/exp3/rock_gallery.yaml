@@ -1,0 +1,11 @@
+expname: rock_gallery
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 5
+prompt: A man-made rock tunnel carved into stone, chisel marks visible, dim lighting,
+  ancient or industrial excavation feel.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp3/

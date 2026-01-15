@@ -1193,27 +1193,30 @@ def load_rgbd_pano(dream, save_dir_, phase, override_depth_with_ones=False):
     colors = PIL_to_numpy(pano_rgb)
 
     depth = np.load(load_dir__ / ".cache" / f"depth.npy")
+    sky_mask = np.load(load_dir__ / ".cache" / f"sky_mask.npy")
     
     if override_depth_with_ones:
         depth = np.ones_like(depth)  
         print("WARNING: depth override to ones for debugging purposes")
 
-    return colors, depth
+    return colors, depth, sky_mask
 
-def save_rgbd_pano(pano_rgb, depth, dream, save_dir_, phase):
+def save_rgbd_pano(pano_rgb, depth, sky_mask, dream, save_dir_, phase):
     save_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
     os.makedirs(save_dir__, exist_ok=True)
     os.makedirs(save_dir__ / ".cache", exist_ok=True)
 
     # save visualization
     pano_rgb.save(save_dir__ / f"pano_rgb.png")
+    numpy_bool_to_pil_mask(sky_mask).save(save_dir__ / f"sky_mask.png")
     depth_numpy_to_figure(depth).savefig(save_dir__ / f"depth_figure.png")
 
     # save cache
     pano_rgb.save(save_dir__ / ".cache" / f"pano_rgb.png")
     np.save(save_dir__ / ".cache" / f"depth.npy", depth)
+    np.save(save_dir__ / ".cache" / f"sky_mask.npy", sky_mask)
 
-def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, dream, save_dir_, phase):
+def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, sky_mask_bg, dream, save_dir_, phase):
     if phase.startswith("1"):
         save_dir__ = save_dir_ / f"dream_{dream:02d}" / phase
     elif phase.startswith("2"):
@@ -1228,11 +1231,12 @@ def save_rgbd_ldi_pano(pano_rgb_bg, depth_bg, mask_bg, dream, save_dir_, phase):
     pano_rgb_bg.save(save_dir__ / f"ldi_pano_rgb.png")
     depth_numpy_to_figure(depth_bg).savefig(save_dir__ / f"ldi_depth_figure.png")
     numpy_bool_to_pil_mask(mask_bg).save(save_dir__ / f"ldi_mask.png")
-
+    numpy_bool_to_pil_mask(sky_mask_bg).save(save_dir__ / f"ldi_sky_mask.png")
     # save cache
     pano_rgb_bg.save(save_dir__ / ".cache" / f"ldi_pano_rgb.png")
     np.save(save_dir__ / ".cache" / f"ldi_depth.npy", depth_bg)
     np.save(save_dir__ / ".cache" / f"ldi_mask.npy", mask_bg)
+    np.save(save_dir__ / ".cache" / f"ldi_sky_mask.npy", sky_mask_bg)
 
 def load_rgbd_ldi_pano(dream, save_dir_, phase):
     if phase.startswith("1"):
@@ -1247,11 +1251,12 @@ def load_rgbd_ldi_pano(dream, save_dir_, phase):
 
     depth_bg = np.load(load_dir__ / ".cache" / f"ldi_depth.npy")
     mask_bg = np.load(load_dir__ / ".cache" / f"ldi_mask.npy")
+    sky_mask_bg = np.load(load_dir__ / ".cache" / f"ldi_sky_mask.npy")
 
-    return colors_bg, depth_bg, mask_bg
+    return colors_bg, depth_bg, mask_bg, sky_mask_bg
 
 class PointCloud:
-    def __init__(self, pts, colors, ldi_mask=None):
+    def __init__(self, pts, colors, ldi_mask=None, sky_mask=None):
         """
         pts: np.array of shape [..., 3]
         colors: np.array of shape [..., 3] with values in [0-1]
@@ -1259,6 +1264,7 @@ class PointCloud:
         self.pts = pts.reshape(-1, 3).astype(np.float32)
         self.colors = colors.reshape(-1, 3).astype(np.float32)
         self.ldi_mask = ldi_mask.reshape(-1).astype(bool) if ldi_mask is not None else None
+        self.sky_mask = sky_mask.reshape(-1).astype(bool) if sky_mask is not None else None
         assert self.pts.shape[0] == self.colors.shape[0], "Error: pts and colors must have the same number of points"
 
     def get_o3d_pointcloud(self):
@@ -1269,11 +1275,12 @@ class PointCloud:
         return pcd
 
 class SphereState:
-    def __init__(self, pts_carte, colors, pose, ldi_mask=None):
+    def __init__(self, pts_carte, colors, pose, ldi_mask=None, sky_mask=None):
         """everything in spherical coordinates"""
         self.pts = pts_carte
         self.colors = colors
         self.ldi_mask = ldi_mask
+        self.sky_mask = sky_mask
         self.pose = pose
         self.is_world_pcd_init=False
     
@@ -1284,7 +1291,8 @@ class SphereState:
         self.world_pcd = PointCloud(
             pts=cam_carte2world_3D(self.pts, self.pose),
             colors=self.colors,
-            ldi_mask=self.ldi_mask
+            ldi_mask=self.ldi_mask,
+            sky_mask=self.sky_mask
         )
         self.is_world_pcd_init=True
 
@@ -1308,7 +1316,7 @@ _default_opening_kwargs = {
 
 class Sphere:
 
-    def __init__(self, pose, pts_carte, colors, ldi_mask=None,forward_sph=None, forward_carte=None, opening_kwargs=_default_opening_kwargs):
+    def __init__(self, pose, pts_carte, colors, ldi_mask=None, sky_mask=None, forward_sph=None, forward_carte=None, opening_kwargs=_default_opening_kwargs):
         """
         Can be derived in four different ways: open left, open right, open both, open none
         Input points are expected not to be opened ye.
@@ -1323,7 +1331,7 @@ class Sphere:
         self.opening_kwargs = opening_kwargs
         self.pose = pose
 
-        self.pts_carte, self.colors, self.ldi_mask = self.filter_nan(pts_carte, colors, ldi_mask)
+        self.pts_carte, self.colors, self.ldi_mask, self.sky_mask = self.filter_nan(pts_carte, colors, ldi_mask, sky_mask)
 
         self.is_closed_init = False
         self.is_both_opened_init = False
@@ -1331,48 +1339,50 @@ class Sphere:
         self.is_right_opened_init = False
 
     @staticmethod
-    def filter_nan(pts_carte, colors, ldi_mask=None):
+    def filter_nan(pts_carte, colors, ldi_mask=None, sky_mask=None):
         mask_finite = np.isfinite(pts_carte).all(axis=-1) & np.isfinite(colors).all(axis=-1)
         pts_carte = pts_carte[mask_finite]
         colors = colors[mask_finite]
         if ldi_mask is not None:
             ldi_mask = ldi_mask[mask_finite]
-        return pts_carte, colors, ldi_mask
+        if sky_mask is not None:
+            sky_mask = sky_mask[mask_finite]
+        return pts_carte, colors, ldi_mask, sky_mask
     
     @property
     def closed(self):
         if not self.is_closed_init:
-            self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask)
+            self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
             self.is_closed_init = True
         return self._closed
 
     @property
     def both_opened(self):
         if not self.is_both_opened_init:
-            self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask)
+            self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
             self.is_both_opened_init = True
         return self._both_opened
     
     @property
     def left_opened(self):
         if not self.is_left_opened_init:
-            self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask)
+            self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
             self.is_left_opened_init = True
         return self._left_opened
 
     @property
     def right_opened(self):
         if not self.is_right_opened_init:
-            self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask)
+            self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
             self.is_right_opened_init = True
         return self._right_opened
     
     def init_all_states(self):
         # compute all openings
-        self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask)
-        self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask)
-        self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask)
-        self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask)
+        self._closed = self._close(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
+        self._both_opened = self._open_both(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
+        self._left_opened = self._open_left(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
+        self._right_opened = self._open_right(self.pts_carte, self.colors, self.ldi_mask, self.sky_mask)
 
     def get_state(self, open_left, open_right):
         if open_left and open_right:
@@ -1384,16 +1394,17 @@ class Sphere:
         else:
             return self.closed
     
-    def _close(self, pts_carte, colors, ldi_mask):
+    def _close(self, pts_carte, colors, ldi_mask, sky_mask):
         sphere_closed = SphereState(
             pts_carte=pts_carte, 
             colors=colors,
             pose=self.pose,
-            ldi_mask=ldi_mask
+            ldi_mask=ldi_mask,
+            sky_mask=sky_mask
         )
         return sphere_closed
     
-    def _open_left(self, pts_carte, colors, ldi_mask):
+    def _open_left(self, pts_carte, colors, ldi_mask, sky_mask):
         _, open_pts_carte, mask_opening = open_world_carte(
             forward_carte=-self.forward_carte,
             pts_carte=pts_carte,
@@ -1403,11 +1414,12 @@ class Sphere:
             pts_carte=open_pts_carte[mask_opening], 
             colors=colors[mask_opening],
             pose=self.pose,
-            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None
+            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None,
+            sky_mask=sky_mask[mask_opening] if sky_mask is not None else None
         )
         return sphere_opened_left
 
-    def _open_right(self, pts_carte, colors, ldi_mask):
+    def _open_right(self, pts_carte, colors, ldi_mask, sky_mask):
         _, open_pts_carte, mask_opening = open_world_carte(
             forward_carte=self.forward_carte,
             pts_carte=pts_carte,
@@ -1417,11 +1429,12 @@ class Sphere:
             pts_carte=open_pts_carte[mask_opening], 
             colors=colors[mask_opening],
             pose=self.pose,
-            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None
+            ldi_mask=ldi_mask[mask_opening] if ldi_mask is not None else None,
+            sky_mask=sky_mask[mask_opening] if sky_mask is not None else None
         )
         return sphere_opened_right
 
-    def _open_both(self, pts_carte, colors, ldi_mask):
+    def _open_both(self, pts_carte, colors, ldi_mask, sky_mask):
         _, open_pts_carte, mask_opening1 = open_world_carte(
             forward_carte=self.forward_carte,
             pts_carte=pts_carte,
@@ -1430,7 +1443,7 @@ class Sphere:
         open_pts_carte = open_pts_carte[mask_opening1]
         colors = colors[mask_opening1]
         ldi_mask = ldi_mask[mask_opening1] if ldi_mask is not None else None
-
+        sky_mask = sky_mask[mask_opening1] if sky_mask is not None else None
         _, open_pts_carte, mask_opening2 = open_world_carte(
             forward_carte=-self.forward_carte,
             pts_carte=open_pts_carte,
@@ -1439,16 +1452,18 @@ class Sphere:
         open_pts_carte = open_pts_carte[mask_opening2]
         colors = colors[mask_opening2]
         ldi_mask = ldi_mask[mask_opening2] if ldi_mask is not None else None
+        sky_mask = sky_mask[mask_opening2] if sky_mask is not None else None
         sphere_opened_both = SphereState(
             pts_carte=open_pts_carte, 
             colors=colors,
             pose=self.pose,
-            ldi_mask=ldi_mask
+            ldi_mask=ldi_mask,
+            sky_mask=sky_mask
         )
 
         return sphere_opened_both
 
-    def add_new_points(self, new_pts_carte, new_colors, new_ldi_mask=None):
+    def add_new_points(self, new_pts_carte, new_colors, new_ldi_mask=None, new_sky_mask=None):
         pts_carte = np.concatenate((self.pts_carte, new_pts_carte.reshape(-1, 3)), axis=0)
         colors = np.concatenate((self.colors, new_colors.reshape(-1, 3)), axis=0)
         if new_ldi_mask is not None:
@@ -1457,8 +1472,14 @@ class Sphere:
         else:
             assert self.ldi_mask is None
             ldi_mask = self.ldi_mask
+        if new_sky_mask is not None:
+            assert self.sky_mask is not None
+            sky_mask = np.concatenate((self.sky_mask, new_sky_mask.reshape(-1)), axis=0)
+        else:
+            assert self.sky_mask is None
+            sky_mask = self.sky_mask
 
-        self.pts_carte, self.colors, self.ldi_mask = self.filter_nan(pts_carte, colors, ldi_mask)
+        self.pts_carte, self.colors, self.ldi_mask, self.sky_mask = self.filter_nan(pts_carte, colors, ldi_mask, sky_mask)
 
         self.is_closed_init = False
         self.is_both_opened_init = False
@@ -1483,6 +1504,7 @@ class Sphere:
             "pts_carte": self.pts_carte,
             "colors": self.colors,
             "ldi_mask": self.ldi_mask,
+            "sky_mask": self.sky_mask,
         }
 
         # Ensure directory exists
@@ -1504,6 +1526,7 @@ class Sphere:
         pts_carte = data["pts_carte"]
         colors = data["colors"]
         ldi_mask = data["ldi_mask"]
+        sky_mask = data["sky_mask"]
         forward_sph = data.get("forward_sph", None)
         forward_carte = data.get("forward_carte", None)
         opening_kwargs = data.get("opening_kwargs", _default_opening_kwargs)
@@ -1513,6 +1536,7 @@ class Sphere:
             pts_carte=pts_carte,
             colors=colors,
             ldi_mask=ldi_mask,
+            sky_mask=sky_mask,
             forward_sph=forward_sph,
             forward_carte=forward_carte,
             opening_kwargs=opening_kwargs,
@@ -2414,7 +2438,7 @@ class GeometryTransforms:
         return pts_prime
 
     @staticmethod
-    def remove_statistical_outliers(pts, colors, nb_neighbors=20, std_ratio=1.8, verbose=False):
+    def remove_statistical_outliers(pts, colors, sky_mask=None, nb_neighbors=20, std_ratio=1.8, verbose=False):
         """
         Remove statistical outliers from a point cloud using Open3D's 
         statistical outlier removal (SOR) filter.
@@ -2459,109 +2483,33 @@ class GeometryTransforms:
         """
         import open3d as o3d
         size_before = pts.size // 3
+        sky_mask = sky_mask.reshape(-1) if sky_mask is not None else None
         t0 = time.time()
         pcd = PointCloud(pts, colors).get_o3d_pointcloud()
         cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
         inlier_pts = np.asarray(cl.points)
         inlier_colors = np.asarray(cl.colors)
+        inlier_sky_mask = sky_mask[ind] if sky_mask is not None else None
         if verbose:
             size_after = inlier_pts.size // 3
             print(f"Removed {100 * (size_before - size_after) / size_before:.2f}% outliers in point cloud in {time.time() - t0:.2f} seconds.")
 
+        if sky_mask is not None:
+            return inlier_pts, inlier_colors, inlier_sky_mask
+        
         return inlier_pts, inlier_colors
-
-    @staticmethod
-    def run_corrective_pipeline_depreciated(colors, depth, sphere_radius, height, width, correct_depth, near, far, correct_floor, correct_walls, remove_sky, indoor_or_outdoor, remove_outliers, verbose=False):
-        #TODO:delete this after testing the next one
-
-        assert not np.any(np.isnan(depth)), "Depth contains NaNs!"
-        assert indoor_or_outdoor in ['indoor', 'outdoor', None], "indoor_or_outdoor must be either 'indoor' or 'outdoor'"
-
-        # 1. Get Metric Depth
-        if correct_depth:
-            depth_corrected = GeometryTransforms.depth_transform(
-                depth, 
-                method="inv", 
-                n=near, 
-                f=far, 
-                gamma=5,
-                plot=True
-            )
-            if verbose:
-                print("a. Metric Depth Obtained.")
-        else:
-            depth_corrected = depth
-            
-        # 2. Project to Camera Space in Cartesian Coordinates
-        pts_cam_cartesian = depth2cam_carte(
-            depth=depth_corrected,
-            sphere_radius=sphere_radius,
-            height=height,
-            width=width,
-        ) # [H, W, 3]
-
-        # 3. Correct Floor
-        if correct_floor:
-            pts_cam_cartesian = GeometryTransforms.correct_floor(
-                pts_cam_cartesian,
-                plot=True
-            )
-            if verbose:
-                print("b. Floor Corrected.")
-
-        # 4. Correct Walls
-        if correct_walls:
-            if indoor_or_outdoor == 'outdoor':
-                sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
-            else:
-                sky_mask = None
-                
-            pts_cam_cartesian = GeometryTransforms.correct_walls(
-                pts_sph=carte2sph_3D(pts_cam_cartesian),
-                theta_range=(np.deg2rad(0), np.deg2rad(70)),
-                edge=np.deg2rad(15),
-                sky_mask=sky_mask
-            )
-            if verbose:
-                print("c. Walls Corrected.")
-
-        #5. remove sky points
-        if remove_sky:
-            assert indoor_or_outdoor == 'outdoor', "Sky removal can only be done for outdoor scenes."
-            sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
-            pts_cam_cartesian[sky_mask] = np.array([np.nan, np.nan, np.nan])
-            #TODO: plot a figure showing the sky mask as an overlay over the image.
-
-            if verbose:
-                print("d. (Optional) Sky Removed.")
-
-        # 6. Remove statistical outliers
-        if remove_outliers: 
-            n_before = len(pts_cam_cartesian.reshape(-1,3))
-            pts_cam_cartesian, colors = GeometryTransforms.remove_statistical_outliers(
-                pts=pts_cam_cartesian,
-                colors=colors,
-                nb_neighbors=20,
-                std_ratio=2.0
-            )
-            n_after = len(pts_cam_cartesian.reshape(-1,3))
-            if verbose:
-                print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
-
-        return pts_cam_cartesian, colors
 
 def run_corrective_pipeline_on_sphere(
         pts, # in cartesian coordinates (local camera frame)
         colors, 
         ldi_mask,
-        height, width, 
+        sky_mask,
         correct_depth, 
         near, 
         far, 
         correct_walls, 
         correct_floor, 
         depth_threshold_for_floor_correction, 
-        remove_sky=False, 
         verbose=False,
         plot=False,
     ):
@@ -2630,37 +2578,13 @@ def run_corrective_pipeline_on_sphere(
         if verbose:
             print("b. Cylindrical Floor Corrected.")
 
-    # 6. remove sky points
-    if remove_sky:
-        sky_mask = GeometryTransforms.get_sky_mask(depth_corrected, height=height, width=width)
-        final_pts = final_pts[~sky_mask] 
-        colors = colors[~sky_mask]
-        ldi_mask = ldi_mask[~sky_mask]
-        #TODO: plot a figure showing the sky mask as an overlay over the image.
-
-        if verbose:
-            print("d. (Optional) Sky Removed.")
-
-    # 7. Remove statistical outliers
-    if False: 
-        # depreciated: use the options passed from outside
-        n_before = len(final_pts.reshape(-1,3))
-        final_pts, colors = GeometryTransforms.remove_statistical_outliers(
-            pts=final_pts,
-            colors=colors,
-            nb_neighbors=outlier_removal_options['nb_neighbors'],
-            std_ratio=outlier_removal_options['std_ratio']
-        )
-        n_after = len(final_pts.reshape(-1,3))
-        if verbose:
-            print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
-    
-    return final_pts, colors, ldi_mask
+    return final_pts, colors, ldi_mask, sky_mask
 
 def run_corrective_pipeline_on_world(
     pts, 
     colors,
     ldi_mask,
+    sky_mask,
     pose_left,
     pose_right,
     translation_direction,
@@ -2795,21 +2719,7 @@ def run_corrective_pipeline_on_world(
         if verbose:
             print("b. Cylindrical Floor Corrected.")
 
-    # 7. Remove statistical outliers
-    if False: 
-        # depreciated
-        n_before = len(final_pts.reshape(-1,3))
-        final_pts, colors = GeometryTransforms.remove_statistical_outliers(
-            pts=final_pts,
-            colors=colors,
-            nb_neighbors=outlier_removal_options['nb_neighbors'],
-            std_ratio=outlier_removal_options['std_ratio']
-        )
-        n_after = len(final_pts.reshape(-1,3))
-        if verbose:
-            print(f"e. (Optional) Outliers Removed ({(n_before - n_after) / n_before * 100:.2f}%)")
-
-    return final_pts, colors, ldi_mask
+    return final_pts, colors, ldi_mask, sky_mask
     
 # ----------------------------- #
 # ----- Utility functions ----- #

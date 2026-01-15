@@ -1190,28 +1190,6 @@ if __name__ == "__main__":
                       [0, 0, 0, 1.0]])
     pose2 = my_utils.camera_translation(pose1, delta_walk * translation_direction)
     pose_intermediate = my_utils.camera_translation(pose2, -delta_walk/2 * translation_direction)
-    
-
-    # # load sphere1
-    # colors1, depth1 = my_utils.load_rgbd_pano(dream=0,save_dir_=save_dir_)
-    # pts1_cam_cartesian = my_utils.depth2cam_carte(
-    #     depth=depth1,
-    #     sphere_radius=sphere_radius,
-    #     height=height,
-    #     width=width,
-    # ) # [H, W, 3]
-    # sphere1 = my_utils.Sphere(pose1, pts1_cam_cartesian, colors1, forward_carte=translation_direction)
-    
-    # # load sphere2
-    # colors2, depth2 = my_utils.load_rgbd_pano(dream=1,save_dir_=save_dir_)
-    # pts2_cam_cartesian = my_utils.depth2cam_carte(
-    #     depth=depth2,
-    #     sphere_radius=sphere_radius,
-    #     height=height,
-    #     width=width,
-    # ) # [H, W, 3]
-    # sphere2 = my_utils.Sphere(pose2, pts2_cam_cartesian, colors2, forward_carte=translation_direction)
-
 
     pcd = my_utils.load_pcd(f"{save_dir_}/raw_dream_pcd.pkl")
     

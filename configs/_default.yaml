@@ -28,7 +28,6 @@ geometry_correction:
     correct_walls: False
     correct_floor: False
     depth_threshold_for_floor_correction: 0.6
-    remove_sky: False
     verbose: False
     plot: False
 
@@ -155,9 +154,15 @@ phase3: # world geometry correction
     options:
       nb_neighbors: 20
       std_ratio: 5.0
+  
+  replace_sky:
+    apply: False
+    source_sky_img: "/home/a.schnepf/phd/SphericalDreamer/sky_pano.png"
+    sky_dist_factor: 3.0
 
 phase4: # render video
-  visualize_removed_points: False
+  visualize_removed_points: False # depreciated
+  exclude_sky_points: False 
   point_size: 3.0
   bg_color: [0, 0, 0, 1]
   width: 512
@@ -171,7 +176,7 @@ phase4: # render video
       min_y: -1.0
       max_y: 1.0
       min_z: -0.1
-      mid_z: 0.1
+      mid_z: 0.05
       max_z: 1.5
     framerate:
       fps: 60

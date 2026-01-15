@@ -1,0 +1,11 @@
+expname: powerplant
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 5
+prompt: An industrial power plant interior with massive turbines, pipes, control panels,
+  metallic textures, dramatic scale.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp3/

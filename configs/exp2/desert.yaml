@@ -1,0 +1,17 @@
+expname: Desert
+prompt: An endless arid environment of rolling sand dunes and cracked earth, shaped by wind and heat, with sparse vegetation, intense sunlight, and a vast open sky.
+
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null #TODO: implemtement this
+
+phase3:
+  replace_sky:
+    apply: True
+    source_sky_img: "/home/a.schnepf/phd/SphericalDreamer/sky_pano.png"
+    sky_dist_factor: 3.0
+    
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp2

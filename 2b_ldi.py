@@ -14,6 +14,7 @@ from harmonic_blending import harmonic_blend_of_depths
 import my_utils
 from my_utils import printc
 import ldi_inpaiting as ldi
+from sky_segmentation import SkyMaskDetector
 
 # Disabling some warnings
 os.environ["GLOG_minloglevel"] = "2"
@@ -83,7 +84,7 @@ if __name__ == "__main__":
                 list_depth_origin.append(my_utils.opencv_resize(depth_estimated, config.height, config.width, mode="bilinear"))
 
             # ---------------------------------------
-            # I. COMPUTE MASK FOR FOREGROUND OBJECTS
+            # 1. COMPUTE MASK FOR FOREGROUND OBJECTS
             # ---------------------------------------
             t0 = time.time()
             list_mask = []
@@ -111,7 +112,7 @@ if __name__ == "__main__":
             print(f"Foreground mask computed in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
             # ------------------------
-            # II. INPAINTING WITH LAMA
+            # 2. INPAINTING WITH LAMA
             # ------------------------
             t0 = time.time()
             list_prompt=[]
@@ -142,7 +143,7 @@ if __name__ == "__main__":
             print(f"Lama inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
             # --------------------------
-            # III. INPAINTING WITH FLUX
+            # 3. INPAINTING WITH FLUX
             # --------------------------
 
             t0 = time.time()
@@ -168,8 +169,21 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             print(f"FLUX inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
+
+            # -----------------------
+            #   3.5 GET SKY MASKS
+            # -----------------------
+            list_sky_mask = []
+            for i in range(config.num_dreams):
+                printc(f"--- {_phase_current}: Get sky mask  {i:02d} / {config.num_dreams} ---", color='yellow')
+                sky_mask = SkyMaskDetector.get_mask(
+                    image=list_inpaint_pano_pil[i-1],
+                )
+                list_sky_mask.append(sky_mask)
+                
+
             # -------------------------------------------------
-            # III. DEPTH INPAINTING (at resolution 1024 * 2048)
+            # 4. DEPTH INPAINTING (at resolution 1024 * 2048)
             # -------------------------------------------------
             t0 = time.time()
             list_depth_inpainted = []
@@ -290,6 +304,7 @@ if __name__ == "__main__":
                     pano_rgb_bg=list_inpaint_pano_pil[i-1],
                     depth_bg=list_depth_inpainted[i-1],
                     mask_bg=list_mask_inpaint_resized[i-1],
+                    sky_mask_bg=list_sky_mask[i-1],
                     dream=i,
                     save_dir_=save_dir_,
                     phase=_phase_current,
