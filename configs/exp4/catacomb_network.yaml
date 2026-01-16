@@ -1,0 +1,11 @@
+expname: catacomb_network
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: Stone corridors branching symmetrically, with repeating alcoves, pillars,
+  and arches, creating uniform visual content regardless of viewing direction.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

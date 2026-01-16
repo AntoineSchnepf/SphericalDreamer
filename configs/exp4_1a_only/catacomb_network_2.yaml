@@ -1,0 +1,12 @@
+expname: catacomb_network_2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 20
+prompt: An underground stone catacomb with walls and arches in weathered limestone
+  gray, dusty beige floors, and dim torchlight casting warm orange highlights and
+  deep shadows.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4_1a_only/

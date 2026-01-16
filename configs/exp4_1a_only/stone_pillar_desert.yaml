@@ -1,0 +1,11 @@
+expname: stone_pillar_desert
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 20
+prompt: A vast arid landscape filled with naturally eroded rock columns arranged quasi-periodically,
+  forming an omnidirectional maze-like environment.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4_1a_only/

@@ -1,0 +1,12 @@
+expname: bioluminescent_forest
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: Towering, softly glowing plants with repeating organic structures in all directions.
+  The density and scale remain consistent, creating an endless, luminous canopy with
+  no dominant orientation.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

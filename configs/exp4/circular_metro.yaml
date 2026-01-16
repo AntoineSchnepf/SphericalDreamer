@@ -1,0 +1,11 @@
+expname: circular_metro
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large ring-shaped underground station with repeating platforms, pillars,
+  and signage, giving the impression of continuity in every direction.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

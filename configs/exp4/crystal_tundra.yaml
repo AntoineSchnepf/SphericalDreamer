@@ -1,0 +1,11 @@
+expname: crystal_tundra
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A flat, icy plain densely populated with translucent crystal spires of varying
+  heights, refracting light uniformly in every direction under a pale sky.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

@@ -1,0 +1,11 @@
+expname: futuristic_datacenter
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: Rows of identical server racks and glowing conduits arranged radially or in
+  a grid, forming a technologically dense but directionally uniform interior.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

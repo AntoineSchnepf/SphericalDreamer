@@ -1,0 +1,13 @@
+expname: bioluminescent_forest_2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: An alien forest illuminated by bioluminescence, with tall plant trunks in
+  deep indigo and emerald tones, broad leaves glowing in cyan and turquoise, and soft
+  violet light diffusing through a dense canopy, creating a luminous, otherworldly
+  atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

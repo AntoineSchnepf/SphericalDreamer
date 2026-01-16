@@ -1,0 +1,12 @@
+expname: crystal_tundra_2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A frozen tundra covered in translucent crystal spires tinted with pale blue,
+  icy white, and hints of lavender, set on a snow-covered ground under a desaturated
+  gray-blue sky, with cold light refracting through the crystals.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp4/

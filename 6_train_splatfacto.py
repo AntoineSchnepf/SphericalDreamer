@@ -39,7 +39,11 @@ printc(command.replace(" --", "\\\n   --"), "gray")
 os.system(command)
 
 # TODO: Apply later
-# ns-render camera-path \
-#     --load-config /home/k.kassab/panorama/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/forest/splatfacto/2025-12-15_142725/config.yml \
-#     --camera-path-filename /home/k.kassab/panorama/SphericalDreamer/OUTPUTS/camera_paths/walk_path.json \
-#     --output-path /home/k.kassab/panorama/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/render/walk_path.mp4
+"""
+ns-render camera-path \
+    --load-config /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/forest/splatfacto/2025-12-30_085122/config.yml \
+    --camera-path-filename /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/camera_paths/walk_path.json \
+    --output-path /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/render/walk_path.mp4
+"""
+
+--output-dir /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/gsplat.ply
