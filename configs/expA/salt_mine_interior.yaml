@@ -1,0 +1,16 @@
+expname: salt_mine_interior
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: The inside of a salt mine resembling a natural cave environment with no straight
+  lines or sharp geometries, an irregular hollowed passage opening forward and continuing
+  behind the observer, rounded organic shapes carved by excavation and erosion-like
+  forms, white and pale pink salt walls with crystalline shimmer, rough matte areas
+  mixed with glossy reflective patches, uneven ground with soft salt rubble, low diffused
+  industrial lighting creating gentle highlights on crystals, faint haze in the air,
+  immersive enclosed subterranean atmosphere with realistic salt textures.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

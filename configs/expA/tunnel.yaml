@@ -1,0 +1,11 @@
+expname: tunnel
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A long underground tunnel stretching straight ahead and continuing behind
+  the observer, concrete walls, dim industrial lights, strong depth cues, moody atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

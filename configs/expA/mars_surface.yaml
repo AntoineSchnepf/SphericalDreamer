@@ -1,0 +1,16 @@
+expname: mars_surface
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: The surface of Mars under clear empty skies with no visible sun or celestial
+  bodies, a wide open barren landscape extending forward and continuing behind the
+  observer, fine reddish dust and compacted regolith forming gentle natural slopes,
+  sparse scattered rocks and a few small boulders with weathered edges, subtle wind-swept
+  texture lines, distant low hills barely breaking the horizon, dry silent atmosphere,
+  realistic mineral textures, cinematic neutral lighting with soft shadows, immersive
+  alien desert emptiness.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

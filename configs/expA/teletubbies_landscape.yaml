@@ -1,0 +1,16 @@
+expname: teletubbies_landscape
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A Teletubbies-inspired playful outdoor environment with soft rounded hills
+  and no defined geometry, the landscape extending forward and behind the observer
+  with bright smooth grassy terrain, vibrant green ground with gentle rolling curves,
+  simple scattered flowers or tiny bushes kept minimal, sky evenly lit with no visible
+  sun, clean cheerful lighting with soft shadows, saturated friendly colors, whimsical
+  calm atmosphere, minimal detail but realistic grass texture, immersive childlike
+  surreal countryside feeling.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

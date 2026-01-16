@@ -27,6 +27,7 @@ phase5v2:
   render_settings:
     use_gpu_series: True   
     use_gpu_parallel: True 
+    keep_ratio: 1 # is ignored if <1 and voxel_size is not None # TODO TEMP
   nfs_dataset:
     bg_color: [0, 0, 0, 1]
     fov_deg: 60.0
@@ -38,3 +39,20 @@ phase5v2:
       max_y: 0.2
       min_z: -0.1
       max_z: 0.3
+  custom_trajectory: # Render custom cameras # TODO TEMP
+    enable: true
+    render_eqr_too: true
+    positions: [
+      [0, -0.15, 0, 0, 270],
+      [0, -0.1, 0, 0, 270],
+      [0, -0.05, 0, 0, 270],
+      [0, 0, 0, 0, 270],
+      [0, 0.05, 0, 0, 270],
+      [0, 0.1, 0, 0, 270],
+      [0, 0.15, 0, 0, 270],
+    ] # List of [x, y, z, elev, azim]
+  custom_world: # Override the default world point cloud # TODO TEMP
+    enable: True
+    scale_factor: 1.3 
+    world_path: OUTPUTS/test_mesh.obj
+    # world_path: OUTPUTS/teddy.obj

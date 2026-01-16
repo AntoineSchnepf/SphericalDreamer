@@ -159,6 +159,69 @@ def import_ply(path):
     return bpy.context.view_layer.objects.active
 
 
+def import_obj(path):
+    """Import an OBJ/FBX/glTF file and return the imported object(s).
+    
+    Returns a single object if only one was imported, or a list of objects if multiple.
+    For multiple objects, also returns a parent empty that contains them all.
+    """
+    import os
+    ext = os.path.splitext(path)[1].lower()
+    
+    # Track objects before import
+    objects_before = set(bpy.data.objects)
+    
+    if ext == '.obj':
+        if hasattr(bpy.ops.wm, "obj_import"):
+            bpy.ops.wm.obj_import(filepath=path)
+        elif hasattr(bpy.ops.import_scene, "obj"):
+            bpy.ops.import_scene.obj(filepath=path)
+        else:
+            raise RuntimeError("No OBJ import operator found in this Blender build.")
+    elif ext == '.fbx':
+        if hasattr(bpy.ops.import_scene, "fbx"):
+            bpy.ops.import_scene.fbx(filepath=path)
+        else:
+            raise RuntimeError("No FBX import operator found in this Blender build.")
+    elif ext in ['.gltf', '.glb']:
+        if hasattr(bpy.ops.import_scene, "gltf"):
+            bpy.ops.import_scene.gltf(filepath=path)
+        else:
+            raise RuntimeError("No glTF import operator found in this Blender build.")
+    else:
+        raise RuntimeError(f"Unsupported mesh format: {ext}")
+    
+    # Find all newly imported objects
+    objects_after = set(bpy.data.objects)
+    new_objects = list(objects_after - objects_before)
+    
+    # Filter to only mesh objects
+    mesh_objects = [obj for obj in new_objects if obj.type == 'MESH']
+    
+    if len(mesh_objects) == 0:
+        print(f"[WARNING] No mesh objects found after importing {path}")
+        return None
+    elif len(mesh_objects) == 1:
+        print(f"  Imported 1 mesh object: {mesh_objects[0].name}")
+        return mesh_objects[0]
+    else:
+        # Multiple mesh objects - join them into one
+        print(f"  Imported {len(mesh_objects)} mesh objects, joining them...")
+        
+        # Deselect all, then select all mesh objects
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in mesh_objects:
+            obj.select_set(True)
+        
+        # Set the first mesh as active and join
+        bpy.context.view_layer.objects.active = mesh_objects[0]
+        bpy.ops.object.join()
+        
+        joined_obj = bpy.context.view_layer.objects.active
+        print(f"  Joined into: {joined_obj.name} ({len(joined_obj.data.vertices)} vertices)")
+        return joined_obj
+
+
 def export_ply_filtered(obj, output_path: str, voxel_attr_name: str = None):
     """
     Export point cloud to PLY, optionally filtering by a boolean attribute.

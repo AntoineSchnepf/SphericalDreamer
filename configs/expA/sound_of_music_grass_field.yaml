@@ -1,0 +1,16 @@
+expname: sound_of_music_grass_field
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A wide open rolling field of lush green grass inspired by The Sound of Music,
+  gentle natural hills extending forward and continuing behind the observer with no
+  harsh edges or defined geometry, thick healthy grass blades forming smooth wind-like
+  patterns, scattered wildflower hints subtle and sparse, cloudy sky overhead with
+  no visible sun, soft diffused daylight creating even illumination and minimal harsh
+  shadows, distant tree line barely visible on the horizon, peaceful cinematic pastoral
+  mood, realistic vegetation textures, immersive open countryside atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/
