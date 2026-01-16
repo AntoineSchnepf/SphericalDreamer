@@ -1,0 +1,12 @@
+expname: bunker
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: An underground nuclear bunker with straight reinforced corridors extending
+  forward and behind the observer, concrete walls, heavy doors, industrial lighting,
+  claustrophobic enclosed space.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

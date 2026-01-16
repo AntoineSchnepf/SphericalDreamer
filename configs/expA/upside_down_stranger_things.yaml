@@ -1,0 +1,16 @@
+expname: upside_down_stranger_things
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A desolate Upside Down-inspired landscape with cloudy oppressive skies and
+  no visible sun, the environment stretching forward and behind the observer with
+  organic uneven terrain, dark damp ground covered in tangled root-like growth and
+  soft alien debris, floating ash-like particles suspended in the air, twisted vegetation
+  silhouettes without sharp geometry, murky fog reducing visibility in the distance,
+  muted blue-gray lighting with eerie contrast, wet reflective patches and slimy textures,
+  cinematic horror mood, immersive otherworldly atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

@@ -1,5 +1,5 @@
 # ---meta---
-expname: default_expname
+expname: default_expname 
 skip_phase3: True
 
 load_phase1a_from: null
@@ -247,6 +247,17 @@ phase5v2:
       max_y: 0.2
       min_z: -0.1
       max_z: 0.3
+  custom_trajectory: # Render custom cameras
+    enable: false
+    positions: [] # List of [x, y, z, elev, azim]
+    render_eqr_too: false  # Also render equirectangular images at each position
+    eqr_resolution:  # Resolution for equirectangular renders
+      width: 2048
+      height: 1024
+  custom_world: # Override the default world point cloud
+    enable: false
+    world_path: null
+    scale_factor: 1.0  # Scale the world by this factor
 
 phase6: # train splatfacto
   near_plane: 0.08

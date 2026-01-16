@@ -1,0 +1,12 @@
+expname: train
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: my primpts...An empty train interior with long straight corridors extending
+  forward and continuing behind the observer, rows of seats, windows reflecting dim
+  exterior light, cinematic lighting, realistic textures, immersive enclosed space.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expA/

@@ -1,0 +1,16 @@
+expname: zelda_cave_organic
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A Zelda-inspired cave interior with no well-defined or sharp geometries, an
+  irregular cavern passage extending forward and behind the observer, rounded rock
+  formations and natural arches, soft uneven walls with mossy patches and mineral
+  staining, scattered stones and earthy ground, subtle glowing ambient light as if
+  from distant bioluminescent minerals or soft torches out of view, cinematic fantasy
+  mood, realistic rock textures with gentle moisture highlights, immersive adventurous
+  underground environment.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expB/
