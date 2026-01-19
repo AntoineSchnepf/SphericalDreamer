@@ -1,0 +1,13 @@
+expname: endless_marble_colonnade
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A monumental marble colonnade with repeating rounded columns extending forward
+  and behind the observer, smooth polished stone surfaces in pale white and beige
+  tones, soft indirect lighting with no visible source, minimal shadows emphasizing
+  symmetry, calm and timeless atmosphere, immersive classical architectural environment.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp5/

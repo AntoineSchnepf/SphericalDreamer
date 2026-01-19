@@ -45,5 +45,7 @@ ns-render camera-path \
     --camera-path-filename /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/camera_paths/walk_path.json \
     --output-path /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/render/walk_path.mp4
 """
-
---output-dir /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/gsplat.ply
+"""
+ns-export gaussian-splat \
+    --load-config /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/nerfstudio_chkpt/forest/splatfacto/2025-12-30_085122/config.yml --output-dir /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/F1_forest/gsplat.ply
+"""

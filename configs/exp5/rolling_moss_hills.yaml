@@ -1,0 +1,13 @@
+expname: rolling_moss_hills
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A landscape of gentle moss-covered hills extending forward and behind the
+  observer, smooth organic terrain with no sharp features, vibrant green moss textures
+  covering the ground, soft overcast sky producing even lighting, minimal contrast
+  and shadows, serene and natural atmosphere, immersive fantasy meadow environment.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp5/

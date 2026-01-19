@@ -1,0 +1,30 @@
+# blender --background --python _blender_ICML_RENDERS.py -- --config _blender/wonderjourney/forest.yaml
+
+
+expname: forest
+num_dreams: 0
+phase5v2:
+  render_settings:
+    min_near_plane: 0.001
+    keep_ratio: 1.0
+
+
+  custom_trajectory: # Render custom cameras
+    enable: true
+    positions:  [
+      [0.0, 0.0, 0.0, 0.0, 0.0],
+      [-0.125, 0.0, 0.0, 0.0, 0.0],
+      [-0.25, 0.0, 0.0, 0.0, 0.0],
+    ]
+
+    render_eqr_too: true  # Also render equirectangular images at each position
+
+  custom_world: # Override the default world point cloud
+    enable: true
+    scene_type: "wonderjourney"  # Type of the custom world
+    world_path: "/home/a.schnepf/phd/experiments/forest/wonderjourney/pcd.ply"  # Path to the custom world PLY file
+    scale_factor: 1.0  # Scale the world by this factor
+  nfs_dataset:
+    fov_deg: 54.2
+
+save_dir: OUTPUTS/X_ICML_RENDERS

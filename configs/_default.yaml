@@ -218,8 +218,8 @@ phase5v2:
     render_engine: CYCLES
     use_gpu_series: True   
     use_gpu_parallel: False 
-    width: 512
-    height: 512
+    width: 800
+    height: 800
     point_size: 0.0022
     keep_ratio: 0.9 # is ignored if <1 and voxel_size is not None
     voxel_size: 0.0012 # voxel-based downsampling. If None, random downsampling is used.
@@ -239,8 +239,8 @@ phase5v2:
   nfs_dataset:
     bg_color: [0, 0, 0, 1]
     fov_deg: 60.0
-    nb_points: 500
-    nb_samples_per_point: 10
+    nb_points: 250
+    nb_samples_per_point: 6
     ranges:
       min_x: 0.0
       min_y: -0.2
@@ -256,6 +256,7 @@ phase5v2:
       height: 1024
   custom_world: # Override the default world point cloud
     enable: false
+    scene_type: null
     world_path: null
     scale_factor: 1.0  # Scale the world by this factor
 

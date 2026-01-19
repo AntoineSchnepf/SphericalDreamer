@@ -1,0 +1,14 @@
+expname: crystal_salt_flats
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: An expansive salt flat landscape extending forward and behind the observer,
+  smooth white crystalline ground with subtle geometric cracking patterns, shallow
+  reflective patches scattered across the surface, pale sky with no visible sun, soft
+  ambient lighting creating minimal shadows, serene and minimalist atmosphere, immersive
+  surreal desert environment.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp5/

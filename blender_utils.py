@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 import yaml
 from pathlib import Path
 import numpy as np
+from mathutils import Matrix, Euler
 
 # -------------------------
 # Render Progress Tracking
@@ -429,7 +430,7 @@ def bbox_center_and_extent_world(obj: bpy.types.Object):
     return center, extent
 
 
-def set_camera_like_open3d(
+def set_camera_like_open3d_bckp(
     cam_obj: bpy.types.Object,
     cam_pos,
     elev_deg: float,
@@ -479,6 +480,107 @@ def set_camera_like_open3d(
     cam_data.clip_start = max(1e-6, float(near))
     cam_data.clip_end = max(cam_data.clip_start * 10.0, float(far))
 
+def set_camera_like_open3d(
+    cam_obj: bpy.types.Object,
+    cam_pos,
+    elev_deg: float,
+    azim_deg: float,
+    fov_deg: float,
+    width: int,
+    height: int,
+    near: float,
+    far: float,
+    world_transform: np.ndarray = None,
+    transform_space: str = "pre",  # "pre" or "post"
+):
+    """
+    Set camera position and orientation using Open3D-style parameters.
+
+    Base convention (before optional transform):
+      - cam position = cam_pos (world)
+      - azimuth around +Z, elevation above XY plane
+      - forward direction = (cos(el)*cos(az), cos(el)*sin(az), sin(el))
+      - Blender camera local -Z points forward
+      - fov_deg treated as horizontal FOV
+
+    Optional:
+      world_transform: (4,4) matrix [[R, t],[0,0,0,1]] used to change coordinate system.
+        If provided, it modifies the computed camera pose.
+
+      transform_space:
+        - "pre":  apply as  X_new = world_transform @ X_old
+                 (i.e., you computed the pose in an "old" world, then map it into Blender world)
+                 cam_world_new = world_transform @ cam_world_old
+        - "post": apply as  X_new = X_old @ world_transform
+                 (rare; useful if you want to apply an extra transform in the camera frame)
+    """
+    # -------------------------
+    # 1) Base camera pose (in the "old" world)
+    # -------------------------
+    cam_pos = np.asarray(cam_pos, dtype=np.float64).reshape(3)
+
+    az = math.radians(float(azim_deg))
+    el = math.radians(float(elev_deg))
+    forward = np.array([
+        math.cos(el) * math.cos(az),
+        math.cos(el) * math.sin(az),
+        math.sin(el),
+    ], dtype=np.float64)
+    forward /= (np.linalg.norm(forward) + 1e-12)
+
+    # Blender orientation: -Z is forward, +Y is up
+    rot_euler = Vector(tuple(forward)).to_track_quat('-Z', 'Y').to_euler()
+    R_bl = np.array(Euler(rot_euler).to_matrix(), dtype=np.float64)
+    t_bl = cam_pos
+
+    # Build 4x4 camera-to-world (C2W) matrix for Blender
+    C2W = np.eye(4, dtype=np.float64)
+    C2W[:3, :3] = R_bl
+    C2W[:3, 3] = t_bl
+
+    # -------------------------
+    # 2) Apply optional world transform
+    # -------------------------
+    if world_transform is not None:
+        M = np.asarray(world_transform, dtype=np.float64)
+        if M.shape != (4, 4):
+            raise ValueError(f"world_transform must be shape (4,4), got {M.shape}")
+        if transform_space == "pre":
+            # Map pose from old world -> new world
+            C2W = M @ C2W
+        elif transform_space == "post":
+            # Apply extra transform in camera/world composition order (less common)
+            C2W = C2W @ M
+        else:
+            raise ValueError("transform_space must be 'pre' or 'post'")
+
+    # -------------------------
+    # 3) Write pose to Blender camera
+    # -------------------------
+    # Blender wants a world matrix (camera-to-world) for object placement
+    cam_obj.matrix_world = Matrix(C2W.tolist())
+
+    # -------------------------
+    # 4) Render resolution
+    # -------------------------
+    scene = bpy.context.scene
+    scene.render.resolution_x = int(width)
+    scene.render.resolution_y = int(height)
+
+    # -------------------------
+    # 5) Camera intrinsics
+    # -------------------------
+    cam_data = cam_obj.data
+    cam_data.type = 'PERSP'
+    cam_data.lens_unit = 'FOV'
+    cam_data.sensor_fit = 'HORIZONTAL'
+    cam_data.angle = math.radians(float(fov_deg))
+
+    # -------------------------
+    # 6) Clipping planes
+    # -------------------------
+    cam_data.clip_start = max(1e-6, float(near))
+    cam_data.clip_end = max(cam_data.clip_start * 10.0, float(far))
 
 # -------------------------
 # Material Helpers

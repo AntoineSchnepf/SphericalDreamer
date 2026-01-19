@@ -99,7 +99,7 @@ def parse_custom_world():
 if IN_BLENDER:
     FRAME_START, FRAME_END, WORKER_ID = parse_frame_range()
     CUSTOM_WORLD_PLY = parse_custom_world()
-    
+
     # -------------------------
     # Config
     # -------------------------
@@ -155,6 +155,7 @@ if IN_BLENDER:
     if CUSTOM_WORLD_PLY is not None:
         # CLI argument takes highest priority
         WORLD_PATH = CUSTOM_WORLD_PLY
+        print(f"[DEBUG] Overriding WORLD_PATH to: {WORLD_PATH}")
         world_name = os.path.basename(WORLD_PATH)
         print(f"Using custom world (CLI): {WORLD_PATH}")
     elif hasattr(config.phase5v2, 'custom_world') and config.phase5v2.custom_world.enable:
@@ -250,7 +251,6 @@ def main():
             print("[ERROR] Custom trajectory enabled but no positions provided!")
             return
         
-        
         # Convert to list of tuples: (x, y, z, elev_deg, azim_deg)
         all_cameras = [tuple(pos) for pos in custom_positions]
         total_cameras = len(all_cameras)
@@ -288,8 +288,8 @@ def main():
         world_basename = os.path.splitext(os.path.basename(WORLD_PATH))[0]
         # Create timestamp for trajectory folder
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        trajectory_folder = f"trajectory_{timestamp}"
-        output_dir = os.path.join(config.save_dir, config.expname, "custom_outputs", world_basename, trajectory_folder)
+        method_name = config.phase5v2.custom_world.scene_type
+        output_dir = os.path.join(config.save_dir, config.expname, method_name)
         print(f"Using custom output directory: {output_dir}")
     else:
         output_dir = os.path.join(config.save_dir, config.expname, "nfs_dataset")
@@ -360,12 +360,6 @@ def main():
                 export_ply_filtered(world_obj, world_dest, voxel_attr_name=voxel_attr_name)
                 print(f"Exported processed PLY to: {world_dest}")
     
-    # Initialize transforms dict
-    transforms = {
-        "camera_model": "OPENCV",
-        "ply_file_path": f"pointcloud/{exported_world_name}",
-        "frames": [],
-    }
     
     # Configure render settings (once, before the loop)
     scene = bpy.context.scene
@@ -528,7 +522,43 @@ def main():
             )
         
         # Set camera
-        set_camera_like_open3d(cam, (cam_x, cam_y, cam_z), elev_deg, azim_deg, FOV_DEG, RES_X, RES_Y, near, far)
+        # TAG: CAMERA SET UP
+        scene_type = config.phase5v2.custom_world.scene_type
+        if scene_type is not None:
+            if scene_type == "scenescape":
+                scale_factor = 1.0
+                R_corr = np.array([
+                    [0, -1, 0],
+                    [-1, 0, 0],
+                    [0, 0, -1],
+                ])
+                T_corr = R_corr @ np.array([0.0, 0.0, 0])
+
+                world_transform = np.concatenate([R_corr, T_corr[:, None]], axis=1)
+                world_transform = np.concatenate([world_transform, np.array([[0, 0, 0, 1]])], axis=0)
+                set_camera_like_open3d(cam, (scale_factor*cam_x, -scale_factor*cam_y, scale_factor*cam_z), elev_deg, azim_deg, FOV_DEG, RES_X, RES_Y, near, far, world_transform=world_transform)
+
+            elif scene_type == "wonderjourney":
+                scale_factor = 1.0
+                R_corr = np.array([
+                    [0, -1, 0],
+                    [0, 0, 1],
+                    [1, 0, 0],
+                ])
+                T_corr = R_corr @ np.array([0.0, 0.0, 0])
+
+                world_transform = np.concatenate([R_corr, T_corr[:, None]], axis=1)
+                world_transform = np.concatenate([world_transform, np.array([[0, 0, 0, 1]])], axis=0)
+                set_camera_like_open3d(cam, (scale_factor*cam_x, scale_factor*cam_y, scale_factor*cam_z), elev_deg, azim_deg, FOV_DEG, RES_X, RES_Y, near, far, world_transform=world_transform)
+            
+            elif scene_type == "sphericaldreamer":
+                set_camera_like_open3d(cam, (cam_x, cam_y, cam_z), elev_deg, azim_deg, FOV_DEG, RES_X, RES_Y, near, far)
+                
+            else:
+                raise ValueError(f"Unsupported scene_type: {scene_type}")
+
+
+        # set_camera_like_open3d(cam, (cam_x, cam_y, cam_z), elev_deg, azim_deg, FOV_DEG, RES_X, RES_Y, near, far, world_transform=world_transform)
         
         # Force scene update (required for geometry nodes and camera changes to take effect)
         bpy.context.view_layer.update()
@@ -572,23 +602,11 @@ def main():
             if rgba_img is not None:
                 rgb_img = rgba_img[:, :, :3]
                 cv2.imwrite(scene.render.filepath, rgb_img)
+                cv2.imwrite(f"render_debug_{i:04d}.png", rgb_img)  # Debug output
             
             # Remove temporary file
             if os.path.exists(temp_rgba_path):
                 os.remove(temp_rgba_path)
-        
-        # Add frame to transforms
-        frame = get_nerfstudio_frame(
-            cam_pos=np.array([cam_x, cam_y, cam_z]),
-            elev_deg=elev_deg,
-            azim_deg=azim_deg,
-            width=RES_X,
-            height=RES_Y,
-            fov_deg=FOV_DEG,
-            file_path=os.path.join("rgb", out_filename)
-        )
-        frame["mask_path"] = os.path.join("mask", mask_filename)
-        transforms['frames'].append(frame)
         
         # Render equirectangular image if enabled
         if render_eqr_too:
@@ -636,6 +654,7 @@ def main():
                 if eqr_rgba is not None and len(eqr_rgba.shape) == 3 and eqr_rgba.shape[2] == 4:
                     eqr_rgb = eqr_rgba[:, :, :3]
                     cv2.imwrite(scene.render.filepath, eqr_rgb)
+                    cv2.imwrite(f"render_eqr_debug_{i}.png", eqr_rgb) 
                 
                 if os.path.exists(temp_eqr_path):
                     os.remove(temp_eqr_path)
@@ -653,164 +672,14 @@ def main():
     
     cleanup_render_handlers()
     
-    # Save transforms.json (partial or full)
-    if is_partial_render:
-        # Save partial transforms for this worker
-        transforms_path = os.path.join(output_dir, f"transforms_worker_{WORKER_ID}.json")
-    else:
-        transforms_path = os.path.join(output_dir, "transforms.json")
-    
-    with open(transforms_path, "w") as f:
-        json.dump(transforms, f, indent=4)
     
     elapsed_time = time.time() - start_time
     print("=" * 60)
     print(f"Rendered {len(frames_to_render)} frames")
     print(f"Saved NFS dataset to: {output_dir}")
-    print(f"Saved transforms to: {transforms_path}")
     print(f"Total time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
     print("=" * 60)
 
-
-def merge_transforms(output_dir, num_workers):
-    """Merge partial transforms.json files from multiple workers."""
-    merged = {
-        "camera_model": "OPENCV",
-        "ply_file_path": None,  # Will be set from first partial file
-        "frames": [],
-    }
-    
-    for worker_id in range(num_workers):
-        partial_path = os.path.join(output_dir, f"transforms_worker_{worker_id}.json")
-        if os.path.exists(partial_path):
-            with open(partial_path, "r") as f:
-                partial = json.load(f)
-                # Get ply_file_path from first valid partial file
-                if merged["ply_file_path"] is None and "ply_file_path" in partial:
-                    merged["ply_file_path"] = partial["ply_file_path"]
-                merged["frames"].extend(partial["frames"])
-            # Clean up partial file
-            os.remove(partial_path)
-    
-    # Sort frames by file path to ensure correct order
-    merged["frames"].sort(key=lambda x: x["file_path"])
-    
-    # Save merged transforms
-    final_path = os.path.join(output_dir, "transforms.json")
-    with open(final_path, "w") as f:
-        json.dump(merged, f, indent=4)
-    
-    print(f"Merged {len(merged['frames'])} frames into {final_path}")
-    return final_path
-
-
-def run_parallel(num_workers, config_path):
-    """
-    Launch multiple Blender processes in parallel to render the dataset.
-    This function is called when running the script directly with Python.
-    """
-    import subprocess
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    
-    start_time = time.time()
-    
-    # We need to compute total frames without Blender
-    # Import config parsing utilities
-    sys.path.insert(0, script_dir)
-    from my_utils import fetch_config_via_parser as my_fetch_config
-    from my_utils import setup as my_setup
-    
-    # Temporarily modify sys.argv to only include config-related args
-    # (my_fetch_config parses sys.argv and would fail on --parallel, --num-workers, etc.)
-    original_argv = sys.argv.copy()
-    sys.argv = [sys.argv[0], "--config", config_path]
-    
-    try:
-        # Parse config to get total frame count
-        config = my_fetch_config(debug=False, debug_parser_override=["--config", config_path])
-        seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_setup(config)
-    finally:
-        # Restore original sys.argv
-        sys.argv = original_argv
-    
-    max_x = (config.num_dreams - 1) * config.sphere_radius * config.delta_walk
-    cfg_nfs = config.phase5v2.nfs_dataset
-    total_frames = cfg_nfs.nb_points * cfg_nfs.nb_samples_per_point
-    
-    output_dir = os.path.join(config.save_dir, config.expname, "nfs_dataset")
-    
-    # Check GPU settings for parallel mode
-    use_gpu_parallel = config.phase5v2.render_settings.use_gpu_parallel
-    if use_gpu_parallel:
-        print("\033[93m" + "=" * 60)
-        print("WARNING: GPU rendering enabled in parallel mode.")
-        print("Multiple Blender instances sharing the same GPU may be slower.")
-        print("Consider setting use_gpu_parallel: False in config for better performance.")
-        print("=" * 60 + "\033[0m")
-    
-    gpu_mode = "GPU" if use_gpu_parallel else "CPU"
-    print("=" * 60)
-    print(f"Parallel Blender Rendering ({gpu_mode} mode)")
-    print(f"  Total frames: {total_frames}")
-    print(f"  Workers: {num_workers}")
-    print(f"  Config: {config_path}")
-    print(f"  Output: {output_dir}")
-    print("=" * 60)
-    
-    # Calculate frame ranges for each worker
-    frames_per_worker = total_frames // num_workers
-    worker_ranges = []
-    for i in range(num_workers):
-        start = i * frames_per_worker
-        end = (i + 1) * frames_per_worker if i < num_workers - 1 else total_frames
-        worker_ranges.append((i, start, end))
-    
-    # Build Blender commands (use use_gpu_parallel setting)
-    script_path = os.path.abspath(__file__)
-    gpu_setting = "True" if use_gpu_parallel else "False"
-    commands = []
-    for worker_id, start, end in worker_ranges:
-        cmd = [
-            "blender", "--background", "--python", script_path,
-            "--", "--config", config_path,
-            "--phase5v2.render_settings.use_gpu_series", gpu_setting,  # Override with parallel setting
-            "--frame-start", str(start),
-            "--frame-end", str(end),
-            "--worker-id", str(worker_id)
-        ]
-        commands.append((worker_id, cmd))
-    
-    # Run workers in parallel using ThreadPoolExecutor (works better for subprocess calls)
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    
-    def run_worker(args):
-        worker_id, cmd = args
-        print(f"[Worker {worker_id}] Starting: frames {worker_ranges[worker_id][1]}-{worker_ranges[worker_id][2]}")
-        result = subprocess.run(cmd, capture_output=False)
-        return worker_id, result.returncode
-    
-    print(f"\nLaunching {num_workers} Blender processes...")
-    
-    # Use ThreadPoolExecutor for parallel execution (better for subprocess calls)
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = {executor.submit(run_worker, cmd): cmd[0] for cmd in commands}
-        for future in as_completed(futures):
-            worker_id, returncode = future.result()
-            if returncode == 0:
-                print(f"[Worker {worker_id}] Completed successfully")
-            else:
-                print(f"[Worker {worker_id}] Failed with code {returncode}")
-    
-    # Merge transforms
-    print("\nMerging transforms from all workers...")
-    merge_transforms(output_dir, num_workers)
-    
-    elapsed_time = time.time() - start_time
-    print("\n" + "=" * 60)
-    print("Parallel rendering complete!")
-    print(f"Output: {output_dir}")
-    print(f"Total time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
-    print("=" * 60)
 
 
 if __name__ == "__main__":

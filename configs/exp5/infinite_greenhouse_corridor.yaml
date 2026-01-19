@@ -1,0 +1,14 @@
+expname: infinite_greenhouse_corridor
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A massive greenhouse corridor extending forward and continuing behind the
+  observer, curved glass walls and ceiling with smooth metal frames, lush green plants
+  growing uniformly along both sides, soft natural light diffused through cloudy glass
+  panels, warm humid atmosphere, repetitive yet organic structure, immersive botanical
+  interior.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp5/

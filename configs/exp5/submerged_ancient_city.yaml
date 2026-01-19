@@ -1,0 +1,14 @@
+expname: submerged_ancient_city
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A submerged ancient city environment viewed underwater, extending forward
+  and behind the observer, smooth stone structures softened by erosion and coral growth,
+  green-blue lighting filtered through water, sandy seabed with scattered debris,
+  slow floating particles in the water, calm and mysterious atmosphere, immersive
+  aquatic ruins.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_exp5/
