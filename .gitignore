@@ -13,3 +13,4 @@ cuda_installer.pyz
 driver_installer.run
 Figures
 viz_ply_pointclouds
+BASELINES_INPUT_IMGS
