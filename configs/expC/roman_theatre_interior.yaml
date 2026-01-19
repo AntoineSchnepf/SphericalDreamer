@@ -1,0 +1,19 @@
+expname: roman_theatre_interior
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D ancient Roman theatre environment with no visible people
+  or animals, the scene extending forward and continuing behind the observer with
+  monumental curved scale, no sharp edges or well-defined geometry, vast stone seating
+  tiers with softened worn steps and rounded erosion, broken sections and rubble piles
+  scattered naturally, wide stage area with cracked stone flooring and weathered debris,
+  moss stains and mineral streaks along crevices, distant arches and columns rising
+  through light haze, cloudy sky visible above with no visible sun disk, no celestial
+  bodies, and nothing happening in the sky, soft diffused neutral daylight creating
+  gentle shadows, cinematic historical atmosphere with immersive monumental grandeur
+  and realistic aged stone textures.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

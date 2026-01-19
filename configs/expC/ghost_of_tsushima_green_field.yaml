@@ -1,0 +1,20 @@
+expname: ghost_of_tsushima_green_field
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D open green field inspired by Ghost of Tsushima with no visible
+  people or animals, the landscape extending forward and continuing behind the observer
+  with immense scale, no sharp or well-defined geometry, soft rolling hills and natural
+  uneven terrain with gentle rises and dips, dense lush grass with varied height and
+  wind-flow patterns forming smooth ripples, subtle shallow tracks and compressed
+  patches in places, minimal scattered stones partially embedded in soil, distant
+  mountain silhouettes or tree lines fading into misty atmospheric haze, cloudy sky
+  with no visible sun, no celestial bodies, and nothing happening in the sky, soft
+  diffused daylight creating smooth even illumination with minimal harsh shadows,
+  calm cinematic samurai-era mood, immersive tranquil natural atmosphere with realistic
+  vegetation textures and depth cues.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

@@ -1,0 +1,20 @@
+expname: alien_tron_apocalyptic_world
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D alien world inspired by Tron Legacy aesthetics but apocalyptic
+  and desolate, with no visible people, no sharp edges and no well-defined geometry,
+  the terrain extending forward and continuing behind the observer in a vast open
+  panorama, cracked dark ground with smooth eroded forms, collapsed futuristic remnants
+  half-buried like melted structures and broken luminous panels, corrupted neon traces
+  glowing faintly beneath ash and dust, scattered alien debris blended with twisted
+  organic growth-like textures, thick polluted atmospheric haze reducing distance
+  clarity, oppressive cloudy sky with no visible sun, no celestial bodies, and nothing
+  happening in the sky, eerie diffuse lighting with cold muted glow, drifting particles
+  suspended in air, cinematic desolation mood with immersive otherworldly apocalypse
+  atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

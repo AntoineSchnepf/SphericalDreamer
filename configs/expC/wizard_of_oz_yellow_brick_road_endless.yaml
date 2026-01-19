@@ -1,0 +1,18 @@
+expname: wizard_of_oz_yellow_brick_road_endless
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D endless Yellow Brick Road environment designed for continuous
+  forward travel, inspired by Wizard of Oz, with no people or animals, the road extending
+  forward and continuing behind the observer endlessly, no sharp or well-defined geometry
+  anywhere, soft rounded countryside hills rolling outward, the yellow brick road
+  repeating with consistent brick detail and subtle variation, green grass fields
+  bordering the path with minimal flowers and tiny bushes, distant horizon hazy and
+  dreamy, cloudy sky with no visible sun disk, no celestial bodies, and nothing happening
+  in the sky, soft diffused whimsical fairytale lighting with gentle shadows, immersive
+  infinite-path atmosphere emphasizing continuity and consistent world expansion.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

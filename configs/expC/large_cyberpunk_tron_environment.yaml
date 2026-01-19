@@ -1,0 +1,19 @@
+expname: large_cyberpunk_tron_environment
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D futuristic world blending cyberpunk density with Tron Legacy
+  neon design, with no visible people or vehicles, the environment extending forward
+  and continuing behind the observer into vast depth, no sharp or well-defined geometry,
+  enormous layered platforms and city structures with softened edges and smooth silhouettes,
+  dark metallic surfaces covered in glowing neon channels and luminous signage-like
+  accents, long deep corridors opening into open plazas, heavy fog and atmospheric
+  haze reducing visibility in the distance, wet reflective ground mirroring neon patterns,
+  floating particles and faint smoke drifting through light beams, dark cloudy sky
+  with no visible sun and nothing happening in the sky, cinematic high-contrast neon
+  lighting, immersive cyber-futuristic mood emphasizing scale and depth realism.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

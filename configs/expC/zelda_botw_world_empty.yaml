@@ -1,0 +1,18 @@
+expname: zelda_botw_world_empty
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: 'A large-scale 3D open world inspired by Zelda: Breath of the Wild with no
+  visible people, creatures, or active events, the environment extending forward and
+  continuing behind the observer with expansive scale, no sharp or well-defined geometry,
+  broad natural terrain with gentle hills and soft slopes, grassy plains mixed with
+  patches of dirt and scattered rounded rocks, subtle shrubs and minimal wild vegetation,
+  distant hills and mountains fading into atmospheric haze, cloudy sky with no visible
+  sun disk, no celestial bodies, and nothing happening in the sky, soft natural diffused
+  daylight with minimal harsh shadows, bright adventurous palette, cinematic exploration
+  mood with immersive depth and realistic stylized materials.'
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

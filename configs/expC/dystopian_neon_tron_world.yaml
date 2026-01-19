@@ -1,0 +1,20 @@
+expname: dystopian_neon_tron_world
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D dystopian neon world inspired by Tron Legacy with no visible
+  people, the environment extending forward and continuing behind the observer with
+  immense futuristic scale, no sharp or well-defined geometry, massive smooth structures
+  and landforms with soft curves and rounded edges, dark metallic ground with glossy
+  reflective panels and subtle wear, glowing neon circuitry patterns embedded into
+  surfaces like luminous veins, distant towering silhouettes fading into heavy atmospheric
+  haze, drifting fog and suspended dust catching neon glow, dark cloudy sky with no
+  visible sun, no celestial bodies, and nothing happening in the sky, high-contrast
+  cinematic lighting dominated by neon illumination, wet reflections and deep shadow
+  pockets, immersive sci-fi dystopian atmosphere with realistic materials and monumental
+  depth.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

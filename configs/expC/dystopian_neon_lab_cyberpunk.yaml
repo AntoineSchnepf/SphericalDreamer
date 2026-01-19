@@ -1,0 +1,18 @@
+expname: dystopian_neon_lab_cyberpunk
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D dystopian neon laboratory inspired by cyberpunk aesthetics,
+  with no visible people, the interior extending forward and continuing behind the
+  observer into deep layered space, no sharp or well-defined geometry, dark metallic
+  walls and worn panels with softened edges, glowing neon accents and holographic-like
+  light sources, wet reflective floors mirroring neon patterns, subtle cables and
+  machinery integrated without clutter, smoky haze and floating dust catching light
+  beams, strong cinematic high-contrast neon lighting with deep shadow pockets, gritty
+  moody cyberpunk atmosphere, immersive industrial-lab realism with depth cues and
+  worn material detail.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

@@ -1,0 +1,17 @@
+expname: aerial_city_view_high_sky
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D aerial view of a vast city seen from extremely high altitude,
+  with no visible people and no foreground clutter, the city stretching outward in
+  all directions beyond the observer, dense building patterns forming an urban texture
+  carpet, distant skyline fading into heavy atmospheric haze, soft cloud layers drifting
+  between the viewpoint and the ground, cloudy sky above with no visible sun disk,
+  no celestial bodies, and nothing happening in the sky, diffuse cinematic lighting
+  with gentle highlights on rooftops and faint reflections on glass towers, calm expansive
+  atmosphere emphasizing immense scale and realistic distance depth.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

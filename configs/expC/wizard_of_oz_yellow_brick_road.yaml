@@ -1,0 +1,19 @@
+expname: wizard_of_oz_yellow_brick_road
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D Wizard of Oz-inspired Yellow Brick Road environment with
+  no visible people or animals, the road extending forward and continuing behind the
+  observer through vast rolling countryside, no sharp edges or well-defined geometry,
+  soft rounded hills and smooth terrain, warm yellow bricks forming a winding path
+  with subtle wear, dirt in crevices and slight unevenness, bright green grassy fields
+  on both sides with minimal wildflowers and tiny bushes, occasional distant rounded
+  trees far away, cloudy sky with no visible sun disk, no celestial bodies, and nothing
+  happening in the sky, soft diffused fairytale daylight with gentle shadows, whimsical
+  cinematic mood, immersive classic fantasy landscape with realistic brick and grass
+  textures.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

@@ -1,0 +1,18 @@
+expname: dystopian_neon_lab_westworld
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D dystopian laboratory interior inspired by Westworld-style
+  sterile futuristic design, with no visible people, the space extending forward and
+  continuing behind the observer like a massive underground facility, no sharp edges
+  or well-defined geometry, smooth clean architectural surfaces with soft curves,
+  metallic floors with subtle reflection, illuminated neon-like light strips embedded
+  along walls and ceilings, sterile haze in the air, minimal scattered lab equipment
+  silhouettes kept orderly, cold clinical cinematic lighting with deep shadows and
+  bright highlights, immersive controlled sci-fi atmosphere with realistic industrial
+  materials and monumental depth.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

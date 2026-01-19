@@ -1,0 +1,17 @@
+expname: disney_insideout_cave
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D Disney-style cave inspired by Inside Out, with no visible
+  people or animals, the cavern extending forward and continuing behind the observer
+  with dreamlike depth, no sharp geometry, smooth rounded walls with soft stylized
+  texture gradients, subtle glowing accents like embedded crystals or luminous mineral
+  veins, clean whimsical lighting with bright ambient bounce light and gentle soft
+  shadows, floor smooth with minimal scattered stones in simple shapes, faint dreamy
+  haze adding depth, colorful controlled palette, cinematic magical family-friendly
+  mood, immersive playful underground atmosphere with polished stylized realism.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/

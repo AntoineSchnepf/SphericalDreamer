@@ -1,0 +1,19 @@
+expname: windows_xp_wallpaper_field
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D landscape inspired by the classic Windows XP wallpaper hills,
+  with no visible people or animals, the rolling green hills extending forward and
+  continuing behind the observer in a wide open panorama, no sharp or well-defined
+  geometry, smooth soft slopes with clean rounded landforms, vibrant thick grass forming
+  a continuous carpet with subtle texture variation, gentle wind-like pattern streaks
+  across the grass, minimal tiny wildflower hints extremely sparse, distant horizon
+  clear and unobstructed, softly cloudy sky overhead with no visible sun disk, no
+  celestial bodies, and nothing happening in the sky, bright cheerful diffused daylight
+  creating soft shadows and high clarity, iconic calm idyllic mood, immersive open
+  countryside atmosphere with crisp realistic grass detail and cinematic simplicity.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/
