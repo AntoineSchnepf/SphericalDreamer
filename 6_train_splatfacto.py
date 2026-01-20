@@ -31,6 +31,7 @@ command = f"""ns-train splatfacto \
     --experiment-name {config.expname} \
     --pipeline.model.collider-params near_plane {config.phase6.near_plane} far_plane {config.phase6.far_plane} \
     --pipeline.model.background-color {config.phase6.background_color} \
+    --viewer.quit-on-train-completion True \
     nerfstudio-data
 """
 
