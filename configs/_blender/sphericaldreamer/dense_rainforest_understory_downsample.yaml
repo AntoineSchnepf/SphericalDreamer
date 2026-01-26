@@ -1,9 +1,9 @@
-expname: forest
+expname: dense_rainforest_understory_downsample
 num_dreams: 0
 phase5v2:
   render_settings:
     min_near_plane: 0.001
-    keep_ratio: 1.0
+    keep_ratio: 0.9
   custom_trajectory:
     enable: true
     positions:
@@ -70,8 +70,8 @@ phase5v2:
     render_eqr_too: true
   custom_world:
     enable: true
-    scene_type: wonderjourney
-    world_path: /home/a.schnepf/phd/experiments/forest/wonderjourney/pcd.ply
+    scene_type: sphericaldreamer
+    world_path: /home/a.schnepf/phd/experiments/dense_rainforest_understory/sphericaldreamer/pcd.ply
     scale_factor: 1.0
   nfs_dataset:
     fov_deg: 54.2

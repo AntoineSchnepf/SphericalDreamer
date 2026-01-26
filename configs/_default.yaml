@@ -225,6 +225,7 @@ phase5v2:
     voxel_size: 0.0012 # voxel-based downsampling. If None, random downsampling is used.
     min_near_plane: 0.01
     max_far_near_ratio: 100000
+    save_rgba: False
   advanced_render_settings:
     use_fast_points: True # use flat discs instead of icospheres
     use_distance_based_point_size: True # closer points are bigger

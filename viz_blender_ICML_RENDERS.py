@@ -1,28 +1,29 @@
 """
 Blender script to render a point cloud from inside using Cycles.
-Usage: blender --background --python 5v2_render_blender.py
+Usage: blender --background --python viz_blender_ICML_RENDERS.py
 
 To render in series, use (best option so far):
-blender --background --python 5v2_render_blender.py -- --config Karim/forest_v3.yaml
+blender --background --python viz_blender_ICML_RENDERS.py -- --config Karim/forest_v3.yaml
 
 To render with a custom world file (PLY or OBJ):
-blender --background --python 5v2_render_blender.py --custom-world my_custom_world.ply -- --config Karim/forest_v3.yaml
-blender --background --python 5v2_render_blender.py --custom-world my_custom_world.obj -- --config Karim/forest_v3.yaml
+blender --background --python viz_blender_ICML_RENDERS.py --custom-world my_custom_world.ply -- --config Karim/forest_v3.yaml
+blender --background --python viz_blender_ICML_RENDERS.py --custom-world my_custom_world.obj -- --config Karim/forest_v3.yaml
 
 (debugging) For manual parallel rendering, use --frame-start and --frame-end:
-blender --background --python 5v2_render_blender.py -- --config Karim/forest_v3.yaml --frame-start 0 --frame-end 100
+blender --background --python viz_blender_ICML_RENDERS.py -- --config Karim/forest_v3.yaml --frame-start 0 --frame-end 100
 
 For parallel launcher (parallel rendering always renders on CPU):
-python 5v2_render_blender.py --parallel --num-workers 8 --config Karim/forest_v3.yaml
+python viz_blender_ICML_RENDERS.py --parallel --num-workers 8 --config Karim/forest_v3.yaml
 """
 
+from email.mime import base
 import math
 import sys
 import os
 import json
 import time
 import numpy as np
-
+DEBUG = False
 # Add script directory to path BEFORE importing local modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
 if script_dir not in sys.path:
@@ -228,6 +229,7 @@ def main():
     # Voxel downsampling (only for point clouds)
     voxel_attr_name = None
     if not IS_MESH_WORLD and KEEP_RATIO < 1.0:
+        print(f"DEBUG: KEEP_RATIO < 1.0: {KEEP_RATIO < 1.0}")
         voxel_attr_name, _ = compute_voxel_downsampling(world_obj, voxel_size=VOXEL_SIZE, target_ratio=KEEP_RATIO)
     
     # Compute clipping planes
@@ -338,27 +340,27 @@ def main():
         print(f"Saved metadata to: {metadata_path}")
     
     # Export processed world file (only if not a partial render or first worker)
-    if IS_MESH_WORLD:
-        # For meshes, just copy the original file
-        exported_world_name = os.path.basename(WORLD_PATH)
-        world_dest = os.path.join(output_dir_pcd, exported_world_name)
-        if not is_partial_render or WORKER_ID == 0:
-            import shutil
-            shutil.copy2(WORLD_PATH, world_dest)
-            print(f"Copied mesh to: {world_dest}")
-    else:
-        # For point clouds, export filtered PLY
-        exported_world_name = "5v2_pcd_filtered.ply"
-        world_dest = os.path.join(output_dir_pcd, exported_world_name)
-        if not is_partial_render or WORKER_ID == 0:
-            if KEEP_RATIO >= 1.0:
-                # No filtering needed, just copy the original PLY
-                import shutil
-                shutil.copy2(WORLD_PATH, world_dest)
-                print(f"Copied original PLY to: {world_dest}")
-            else:
-                export_ply_filtered(world_obj, world_dest, voxel_attr_name=voxel_attr_name)
-                print(f"Exported processed PLY to: {world_dest}")
+    # if IS_MESH_WORLD:
+    #     # For meshes, just copy the original file
+    #     exported_world_name = os.path.basename(WORLD_PATH)
+    #     world_dest = os.path.join(output_dir_pcd, exported_world_name)
+    #     if not is_partial_render or WORKER_ID == 0:
+    #         import shutil
+    #         shutil.copy2(WORLD_PATH, world_dest)
+    #         print(f"Copied mesh to: {world_dest}")
+    # else:
+    #     # For point clouds, export filtered PLY
+    #     exported_world_name = "5v2_pcd_filtered.ply"
+    #     world_dest = os.path.join(output_dir_pcd, exported_world_name)
+    #     if not is_partial_render or WORKER_ID == 0:
+    #         if KEEP_RATIO >= 1.0:
+    #             # No filtering needed, just copy the original PLY
+    #             import shutil
+    #             shutil.copy2(WORLD_PATH, world_dest)
+    #             print(f"Copied original PLY to: {world_dest}")
+    #         else:
+    #             export_ply_filtered(world_obj, world_dest, voxel_attr_name=voxel_attr_name)
+    #             print(f"Exported processed PLY to: {world_dest}")
     
     
     # Configure render settings (once, before the loop)
@@ -519,6 +521,7 @@ def main():
                 base_distance=max(0.1, dist) if dist > 0.01 else bbox_radius * 0.5,
                 culling_start_distance=CULLING_START_DISTANCE, culling_end_distance=CULLING_END_DISTANCE,
                 max_render_distance=MAX_RENDER_DISTANCE,
+                wonderjourney_override=(config.phase5v2.custom_world.scene_type == "wonderjourney") 
             )
         
         # Set camera
@@ -564,8 +567,10 @@ def main():
         bpy.context.view_layer.update()
         
         # Render to image
-        out_filename = f"{i:04d}.png"
-        scene.render.filepath = os.path.join(output_dir_rgb, out_filename)
+        out_filename = f"azi={azim_deg:.02f}.png"
+        savedir_ = os.path.join(output_dir_rgb, f"x={cam_x:.02f}")
+        os.makedirs(savedir_, exist_ok=True) 
+        scene.render.filepath = os.path.join(savedir_, out_filename)
         
         if idx == 0:
             setup_render_handlers()
@@ -577,8 +582,11 @@ def main():
         # Save mask (areas with no points = black (ignore), areas with points = white (keep))
         # The alpha channel from transparent render: 0 = no geometry, 255 = geometry
         # We keep it as-is: black (0) = background/no points (ignore), white (255) = has points (keep)
-        mask_filename = f"{i:04d}.png"
-        mask_filepath = os.path.join(output_dir_mask, mask_filename)
+        savedir_ = os.path.join(output_dir_mask, f"x={cam_x:.02f}")
+        os.makedirs(savedir_, exist_ok=True) 
+
+        mask_filename = f"azi={azim_deg:.02f}.png" #TAG
+        mask_filepath = os.path.join(savedir_, mask_filename)
         
         # Get the rendered image from Blender's image buffer
         render_result = bpy.data.images.get('Render Result')
@@ -602,7 +610,11 @@ def main():
             if rgba_img is not None:
                 rgb_img = rgba_img[:, :, :3]
                 cv2.imwrite(scene.render.filepath, rgb_img)
-                cv2.imwrite(f"render_debug_{i:04d}.png", rgb_img)  # Debug output
+                if config.phase5v2.render_settings.save_rgba:
+                    base, ext = os.path.splitext(scene.render.filepath)
+                    cv2.imwrite(base + "_rgba.png", rgba_img)
+                if DEBUG:
+                    cv2.imwrite(f"render_debug_{i:04d}.png", rgb_img)  # Debug output
             
             # Remove temporary file
             if os.path.exists(temp_rgba_path):
@@ -637,8 +649,11 @@ def main():
             # But we still set orientation so the "front" of the panorama matches the perspective view direction
             
             # Render EQR
-            eqr_filename = f"{i:04d}.png"
-            scene.render.filepath = os.path.join(output_dir_eqr, eqr_filename)
+            savedir_ = os.path.join(output_dir_eqr, f"x={cam_x:.02f}")
+            os.makedirs(savedir_, exist_ok=True) 
+
+            eqr_filename = f"azi={azim_deg:.02f}.png"
+            scene.render.filepath = os.path.join(savedir_, eqr_filename)
             
             print(f"    Rendering EQR frame {idx+1}/{len(frames_to_render)}: {eqr_width}x{eqr_height}")
             sys.stdout.flush()
@@ -654,7 +669,12 @@ def main():
                 if eqr_rgba is not None and len(eqr_rgba.shape) == 3 and eqr_rgba.shape[2] == 4:
                     eqr_rgb = eqr_rgba[:, :, :3]
                     cv2.imwrite(scene.render.filepath, eqr_rgb)
-                    cv2.imwrite(f"render_eqr_debug_{i}.png", eqr_rgb) 
+                    if config.phase5v2.render_settings.save_rgba:
+                        base, ext = os.path.splitext(scene.render.filepath)
+                        cv2.imwrite(base + "_rgba.png", eqr_rgba)
+
+                    if DEBUG:
+                        cv2.imwrite(f"render_eqr_debug_{i}.png", eqr_rgb) 
                 
                 if os.path.exists(temp_eqr_path):
                     os.remove(temp_eqr_path)

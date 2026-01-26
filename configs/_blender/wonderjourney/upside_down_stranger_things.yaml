@@ -1,11 +1,15 @@
-expname: forest
+expname: upside_down_stranger_things
 num_dreams: 0
 phase5v2:
   render_settings:
     min_near_plane: 0.001
     keep_ratio: 1.0
+    point_size: 0.033
   custom_trajectory:
     enable: true
+    eqr_resolution:
+      width: 2048
+      height: 1024
     positions:
     - - 0.0
       - 0.0
@@ -71,8 +75,8 @@ phase5v2:
   custom_world:
     enable: true
     scene_type: wonderjourney
-    world_path: /home/a.schnepf/phd/experiments/forest/wonderjourney/pcd.ply
+    world_path: /home/a.schnepf/phd/experiments/upside_down_stranger_things/wonderjourney/pcd.ply
     scale_factor: 1.0
   nfs_dataset:
     fov_deg: 54.2
-save_dir: OUTPUTS/X_ICML_RENDERS
+save_dir: OUTPUTS/X_ICML_RENDERS/qualitative

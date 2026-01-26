@@ -781,6 +781,7 @@ def make_point_cloud_geometry_nodes(
     culling_start_distance: float = 1.0,
     culling_end_distance: float = 5.0,
     max_render_distance: float = None,
+    wonderjourney_override = False
 ):
     """
     Use geometry nodes to render point cloud with vertex colors.
@@ -937,6 +938,7 @@ def make_point_cloud_geometry_nodes(
             # Divide by base_distance
             divide = nodes.new("ShaderNodeMath")
             divide.operation = 'DIVIDE'
+            print("BASE_DISTANCE:", base_distance)
             divide.inputs[1].default_value = max(0.001, base_distance)
             links.new(vec_length.outputs["Value"], divide.inputs[0])
             
@@ -948,12 +950,20 @@ def make_point_cloud_geometry_nodes(
             
             # Clamp to reasonable range (0.5x to 3x base radius)
             clamp = nodes.new("ShaderNodeClamp")
-            clamp.inputs["Min"].default_value = float(point_radius) * 0.5
-            clamp.inputs["Max"].default_value = float(point_radius) * 3.0
+            if wonderjourney_override:
+                clamp.inputs["Min"].default_value = float(point_radius) * 0.01
+            else:
+                clamp.inputs["Min"].default_value = float(point_radius) * 0.5
+            if wonderjourney_override:
+                clamp.inputs["Max"].default_value = float(point_radius) * 200.0
+            else:
+                clamp.inputs["Max"].default_value = float(point_radius) * 3.0
+
             links.new(multiply.outputs["Value"], clamp.inputs["Value"])
             
             # Connect to set_radius
             links.new(clamp.outputs["Result"], set_radius.inputs["Radius"])
+            # links.new(vec_length.outputs["Value"], set_radius.inputs["Radius"])
         else:
             # Fixed radius
             set_radius.inputs["Radius"].default_value = float(point_radius)
