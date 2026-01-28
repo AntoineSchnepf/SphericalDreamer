@@ -31,7 +31,7 @@ def overlay_purple_and_save(pano, mask, out_path, alpha=0.35):
 if __name__ == "__main__":
 
     save_dir = Path("OUTPUTS/SphericalDreamerRecurse")
-    save_dir__ = save_dir / "forest_v3"
+    save_dir__ = save_dir / "Forest_v2"
 
 
     figdir = Path("/home/a.schnepf/phd/SphericalDreamer/Figures")

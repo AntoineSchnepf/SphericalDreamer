@@ -1,4 +1,5 @@
 from my_utils import PointCloud, Sphere
+import my_utils
 import numpy as mp
 import open3d as o3d
 from pathlib import Path
@@ -76,9 +77,9 @@ basic_spheres_key = [
 
 
 conbo_spheres = {
-    # "hollow_capsule": ["sphere1_open", "sphere2_open"],
-    # "filled_capsule": ["sphere1_open", "sphere2_open", "blended_harmonic"],
-    # "filled_capsule_colored": ["sphere1_open", "sphere2_open", "blended_harmonic"]
+    "hollow_capsule": ["sphere1_open", "sphere2_open"],
+    "filled_capsule": ["sphere1_open", "sphere2_open", "blended_harmonic"],
+    "filled_capsule_colored": ["sphere1_open", "sphere2_open", "blended_harmonic"]
 }
 
 which_ply = "sphere1_open"
@@ -92,6 +93,8 @@ if __name__ == "__main__":
     capsules = False
     full_world = False
     partial_world = False
+    ldp_ablation = False
+    fig1_pcd = True
 
     # THIS saves the actual opened spheres used during hblending
     # for which_sphere in pointcloud_zoo_keys:
@@ -207,27 +210,119 @@ if __name__ == "__main__":
 
 
     # THIS show rendering with and without LDI (single sphere)
-    sphere = Sphere.instanciate_from_saved_dict(OUTPUTS / expname  / f"align_01" / "2a" / ".cache" / "sphere2.pkl" )
-    single_sphere_ldi = sphere.closed.get_world_pcd()
+    if ldp_ablation:
+        sphere = Sphere.instanciate_from_saved_dict(OUTPUTS / expname  / f"align_01" / "2a" / ".cache" / "sphere2.pkl" )
+        single_sphere_ldi = sphere.closed.get_world_pcd()
 
-    pts_ldi = single_sphere_ldi.pts
-    colors_ldi = single_sphere_ldi.colors
-    ldi_mask = single_sphere_ldi.ldi_mask
+        pts_ldi = single_sphere_ldi.pts
+        colors_ldi = single_sphere_ldi.colors
+        ldi_mask = single_sphere_ldi.ldi_mask
 
-    pts_no_ldi = pts_ldi[~ldi_mask]
-    colors_no_ldi = colors_ldi[~ldi_mask]
+        pts_no_ldi = pts_ldi[~ldi_mask]
+        colors_no_ldi = colors_ldi[~ldi_mask]
 
-    single_sphere_ldi = o3d.geometry.PointCloud()
-    single_sphere_ldi.points = o3d.utility.Vector3dVector(pts_ldi)
-    single_sphere_ldi.colors = o3d.utility.Vector3dVector(colors_ldi)
-    ply_path = get_ply_path(expname, "single_sphere_ldi")
-    o3d.io.write_point_cloud(str(ply_path), single_sphere_ldi)
-    print(f"Saved PLY for single_sphere_ldi")
+        single_sphere_ldi = o3d.geometry.PointCloud()
+        single_sphere_ldi.points = o3d.utility.Vector3dVector(pts_ldi)
+        single_sphere_ldi.colors = o3d.utility.Vector3dVector(colors_ldi)
+        ply_path = get_ply_path(expname, "single_sphere_ldi")
+        o3d.io.write_point_cloud(str(ply_path), single_sphere_ldi)
+        print(f"Saved PLY for single_sphere_ldi")
 
-    single_sphere_no_ldi = o3d.geometry.PointCloud()
-    single_sphere_no_ldi.points = o3d.utility.Vector3dVector(pts_no_ldi)
-    single_sphere_no_ldi.colors = o3d.utility.Vector3dVector(colors_no_ldi)
-    ply_path = get_ply_path(expname, "single_sphere_no_ldi")
-    o3d.io.write_point_cloud(str(ply_path), single_sphere_no_ldi)
-    print(f"Saved PLY for single_sphere_no_ldi")
+        single_sphere_no_ldi = o3d.geometry.PointCloud()
+        single_sphere_no_ldi.points = o3d.utility.Vector3dVector(pts_no_ldi)
+        single_sphere_no_ldi.colors = o3d.utility.Vector3dVector(colors_no_ldi)
+        ply_path = get_ply_path(expname, "single_sphere_no_ldi")
+        o3d.io.write_point_cloud(str(ply_path), single_sphere_no_ldi)
+        print(f"Saved PLY for single_sphere_no_ldi")
 
+    if fig1_pcd:
+        config = my_utils.fetch_config_via_parser(
+            debug=True, 
+            debug_parser_override=["--config", "Antoine/Forest_v2.yaml"]
+        )
+        seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
+        save_dir_full_world = OUTPUTS / "Forest_v2"
+        # for align in range(1, 6):
+        all_points = []
+        all_colors = []
+        all_ldi_mask = []
+
+        for align in range(1, 5):
+            pointcloud_zoo = pickle.load(open(save_dir_full_world / f"align_{align:02d}" / "2c_pointclouds_zoo.pkl", "rb"))
+            pts = pointcloud_zoo['blended_harmonic'].pts
+            colors = pointcloud_zoo['blended_harmonic'].colors
+            ldi_mask = np.zeros((pts.shape[0],), dtype=bool)
+            all_points.append(pts)
+            all_colors.append(colors)
+            all_ldi_mask.append(ldi_mask)
+            pts = pointcloud_zoo['sphere1_open'].pts
+            colors = pointcloud_zoo['sphere1_open'].colors
+            ldi_mask = pointcloud_zoo['sphere1_open'].ldi_mask
+            all_points.append(pts)
+            all_colors.append(colors)
+            all_ldi_mask.append(ldi_mask)
+
+
+
+        all_points.append(pointcloud_zoo['sphere2_open'].pts)
+        all_colors.append(pointcloud_zoo['sphere2_open'].colors)
+        all_ldi_mask.append(pointcloud_zoo['sphere2_open'].ldi_mask)
+        all_points = np.vstack(all_points)
+        all_colors = np.vstack(all_colors)
+        all_ldi_mask = np.hstack(all_ldi_mask)
+
+        # z_filer 
+        r = 0.8
+        x = all_points[:,0]
+        y = all_points[:,1]
+        z = all_points[:,2]
+        reject_mask1 = (
+            (y < 0.1) 
+            & (z > 0.2) 
+            & (y**2 + z**2 > r**2)
+        )
+        
+
+        pose_left = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float32)
+
+        delta_walk = config.sphere_radius * config.delta_walk 
+        translation_direction = my_utils.get_norm_vector(np.array(config.translation_direction, dtype=np.float32))
+        translation = (config.num_dreams-1) * delta_walk * np.array(config.translation_direction)
+        pose_right = my_utils.camera_translation(pose_left, translation) 
+
+        # remove points at both ends for now
+        skip = False
+
+        if skip:
+            pts_corrected, colors_corrected = all_points, all_colors
+        else:
+            pts_corrected, colors_corrected, ldi_mask_corrected, sky_mask_corrected = my_utils.run_corrective_pipeline_on_world(
+                pts=all_points,
+                colors=all_colors,
+                ldi_mask=all_ldi_mask,
+                sky_mask=np.zeros((all_points.shape[0],), dtype=bool),
+                pose_left=pose_left,
+                pose_right=pose_right,
+                translation_direction=translation_direction,
+                verbose=False,
+                plot=True,
+                **config.phase3.world_correction.options
+            )
+
+        # y filter
+        reject_mask_2 = pts_corrected[:,1] < - 0.7
+
+
+        all_points_final = pts_corrected[~reject_mask1 & ~reject_mask_2]
+        all_colors_final = colors_corrected[~reject_mask1 & ~reject_mask_2]
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(all_points_final)
+        pcd.colors = o3d.utility.Vector3dVector(all_colors_final)
+        ply_path = get_ply_path(expname, "Forest_pcd_fig1")
+        o3d.io.write_point_cloud(str(ply_path), pcd)
+        print(f"Saved PLY for Forest_pcd_fig1")

@@ -324,10 +324,10 @@ def get_world_save_name(scene_type):
 
 
 BASE_PATH = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/_blender_quantitatif")
-SPHERICAL_DREAMER_DOWNSAMPLE = True
+SPHERICAL_DREAMER_DOWNSAMPLE = False
 TRAJ_TYPES = ['rot', 'trans', 'rot+trans']
 HEIGHT = 800
-WIDTH = 800 
+WIDTH = 1600 
 
 cfg_paths= []  # <-- collect generated configs
 for scene_type in ["wonderjourney", "scenescape", "sphericaldreamer"]:

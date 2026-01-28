@@ -7,7 +7,7 @@ import matplotlib.cm as cm
 # ------------------ Paths ------------------
 TARGET_SIZE = (1440, 720)  # (width, height)
 
-exp_path = Path("/home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/Forest")
+exp_path = Path("/home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/Forest_v2")
 original_dir = exp_path / "dream_01/1a/.cache"
 original_image_name = "pano_rgb.png"
 original_depth_name = "depth.npy"

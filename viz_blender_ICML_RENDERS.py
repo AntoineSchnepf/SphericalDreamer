@@ -60,6 +60,33 @@ _phase_4 = "4"
 # -------------------------
 # Parse frame range arguments (for parallel rendering)
 # -------------------------
+
+
+
+def get_compositor_tree(scene: bpy.types.Scene) -> bpy.types.NodeTree:
+    # Ensure compositing is enabled in the scene
+    scene.render.use_compositing = True
+
+    # Preferred (when available): scene.node_tree
+    # Note: scene.use_nodes is deprecated but still needed in many versions
+    try:
+        scene.use_nodes = True
+    except Exception:
+        pass
+
+    if getattr(scene, "node_tree", None) is not None:
+        return scene.node_tree
+
+    # Hard fallback: create/find a compositor node tree
+    # Blender stores compositor trees in bpy.data.node_groups
+    # Create a new compositor tree and attach it
+    tree = bpy.data.node_groups.new(name="CompositorTree", type="CompositorNodeTree")
+
+    # Some versions don't let you assign scene.node_tree directly, but scene.use_nodes
+    # should pick up the created tree; if not, just return `tree` and use it directly.
+    return tree
+
+
 def parse_frame_range():
     """Parse --frame-start, --frame-end, and --worker-id from command line arguments."""
     frame_start = None
@@ -297,9 +324,11 @@ def main():
         output_dir = os.path.join(config.save_dir, config.expname, "nfs_dataset")
     
     output_dir_rgb = os.path.join(output_dir, "rgb")
+    output_dir_depth = os.path.join(output_dir, "depth")
     output_dir_mask = os.path.join(output_dir, "mask")
     output_dir_pcd = os.path.join(output_dir, "pointcloud")
     os.makedirs(output_dir_rgb, exist_ok=True)
+    os.makedirs(output_dir_depth, exist_ok=True)
     os.makedirs(output_dir_mask, exist_ok=True)
     os.makedirs(output_dir_pcd, exist_ok=True)
     
@@ -380,6 +409,29 @@ def main():
     scene.cycles.samples = RENDER_SAMPLES
     scene.cycles.use_adaptive_sampling = False
     
+    # Depth rendering settings
+
+    view_layer = scene.view_layers["ViewLayer"]
+    view_layer.use_pass_z = True
+
+    tree = get_compositor_tree(scene)
+
+    nodes = tree.nodes
+    links = tree.links
+    nodes.clear()
+
+    rl = nodes.new("CompositorNodeRLayers")
+    depth_out = nodes.new("CompositorNodeOutputFile")
+
+    depth_out.label = "DepthOutput"
+    depth_out.format.file_format = "OPEN_EXR_MULTILAYER"
+    depth_out.format.color_depth = "32"      # float32
+    depth_out.format.color_mode = "RGB"       # single channel
+
+    # Link Z pass to file output
+    tree.links.new(rl.outputs["Depth"], depth_out.inputs[0])
+
+
     if IS_MESH_WORLD:
         # Use emissive material for meshes - no lighting needed, uniform appearance
         scene.cycles.max_bounces = 0
@@ -568,6 +620,7 @@ def main():
         
         # Render to image
         out_filename = f"azi={azim_deg:.02f}.png"
+        out_filename_depth = f"azi={azim_deg:.02f}.exr"
         savedir_ = os.path.join(output_dir_rgb, f"x={cam_x:.02f}")
         os.makedirs(savedir_, exist_ok=True) 
         scene.render.filepath = os.path.join(savedir_, out_filename)
@@ -617,8 +670,8 @@ def main():
                     cv2.imwrite(f"render_debug_{i:04d}.png", rgb_img)  # Debug output
             
             # Remove temporary file
-            if os.path.exists(temp_rgba_path):
-                os.remove(temp_rgba_path)
+            # if os.path.exists(temp_rgba_path):
+            #     os.remove(temp_rgba_path)
         
         # Render equirectangular image if enabled
         if render_eqr_too:

@@ -1,15 +1,5 @@
 """
-Blender script to render a point cloud from inside using Cycles.
-Usage: blender --background --python viz_capsule_2_render.py
-
-To render in series, use (best option so far):
 blender --background --python viz_capsule_2_render.py -- --config Antoine/forest_v3.yaml
-
-(debugging) For manual parallel rendering, use --frame-start and --frame-end:
-blender --background --python viz_capsule_2_render.py -- --config Karim/forest_v3.yaml --frame-start 0 --frame-end 100
-
-For parallel launcher (parallel rendering always renders on CPU):
-python viz_capsule_2_render.py --parallel --num-workers 8 --config Karim/forest_v3.yaml
 """
 
 import math
@@ -50,7 +40,8 @@ ply_files_save_dir = Path("/home/a.schnepf/phd/SphericalDreamer/viz_ply_pointclo
 # which_ply = "Forest_full_pcd_main_fig"
 # which_ply = "Forest_partial_pcd_appendix_fig"
 # which_ply = "single_sphere_no_ldi"
-which_ply = "single_sphere_ldi"
+# which_ply = "single_sphere_ldi"
+which_ply = "Forest_pcd_fig1"
 
 max_x =  1.57
 max_x_forest = 1.57 * (5-1)
@@ -115,16 +106,18 @@ all_cameras_per_sphere = {
         (max_x, -0.2, 0.0, 0, 180),
         (max_x, -0.3, 0.0, 0, 180),
     ],
-
-
+    "Forest_pcd_fig1": [
+        (max_x_forest/2, -8, 0.5, -2, 90),
+        (max_x_forest/2, -8, 2, -15, 90),
+    ],
 }
 all_cameras = all_cameras_per_sphere[which_ply]
 height_ = 1024
 width_ = 1024
 # which_ply = "Forest_full_pcd_main_fig"
-if which_ply == "Forest_partial_pcd_appendix_fig" or which_ply == "Forest_full_pcd_main_fig":
+if which_ply == "Forest_partial_pcd_appendix_fig" or which_ply == "Forest_full_pcd_main_fig" or which_ply=="Forest_pcd_fig1":
     height_ = 1048
-    width_ = 2048
+    width_ = 1048*3
 
 
 if which_ply == "single_sphere_no_ldi" or which_ply == "single_sphere_ldi":
