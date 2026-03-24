@@ -1,0 +1,8 @@
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=5/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=5/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=5/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=5/sound_of_music_grass_field.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=7/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=7/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=7/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N/N=7/sound_of_music_grass_field.yaml
