@@ -2,7 +2,7 @@ from pathlib import Path
 load_from=Path("/home/a.schnepf/phd/SphericalDreamer/configs/paper")
 save_at=Path("/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_N")
 
-N_values = [5, 7]
+N_values = [2, 4, 5, 6]
 import sys
 import os
 sys.path.append("/home/a.schnepf/phd/SphericalDreamer")

@@ -347,6 +347,21 @@ def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=F
 
 def setup(config):
     seeds = [config.seed + offset for offset in config.seed_offsets]
+
+    if len(seeds) == 0:
+        raise ValueError("No seeds provided.")
+
+    if len(seeds) < config.num_dreams:
+        printc(
+            "WARNING: Not enough seeds provided; cycling through seeds.",
+            color="yellow"
+        )
+
+        i = 0
+        while len(seeds) < config.num_dreams:
+            seeds.append(seeds[i % len(config.seed_offsets)])
+            i += 1
+
     if config.depth_model == 'egformer':
         width = 1024
         height = 512

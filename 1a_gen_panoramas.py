@@ -24,7 +24,7 @@ with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
 import my_utils
 from my_utils import printc
-from sky_segmentation import SkyMaskDetector
+# from sky_segmentation import SkyMaskDetector
 
 _phase_1a = "1a"
 _phase_1b = "1b"
@@ -62,7 +62,7 @@ if __name__ == "__main__":
             # Generate panorama & Estimate Depth
             pano_rgb = spherical_dreamer.gen_pano(prompt=config.prompt, override_with_inpaint=config.phase1.override_with_inpaint, seed_override=seeds[i])
             depth = spherical_dreamer.estimate_pano_depth(pano_rgb=np.array(pano_rgb))
-            sky_mask = SkyMaskDetector.get_mask(pano_rgb)
+            sky_mask = np.zeros_like(depth).astype(bool)  
             my_utils.save_rgbd_pano(
                 pano_rgb=pano_rgb,
                 depth=depth,
