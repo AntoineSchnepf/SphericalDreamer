@@ -113,6 +113,9 @@ phase1: # panorama generation
 
 phase2: # pairs of sphere inpainting + deformation
   apply_ldi: True
+  ablate_hblending:
+    apply: False
+    depth_blending_mode: "naive" # "naive", "interp_nearest", "interp_bilinear_plus_nn", "inpaint"
   rendering_version: 0 # 0, 1 or 2
   skip_inpainting: False
   inpainting_resolution:

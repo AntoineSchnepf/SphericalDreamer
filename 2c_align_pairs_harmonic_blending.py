@@ -32,6 +32,8 @@ from pathlib import Path
 import argparse
 from prodict import Prodict
 import pyfiglet
+import ldi_inpaiting as ldi
+
 # local imports
 _360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
 sys.path.append(_360monodepth_install_dir) 
@@ -50,6 +52,195 @@ _phase_2b = "2b"
 _phase_2c = "2c"
 
 _phase_current = _phase_2c
+
+    
+def inpaint_depth(depth, image_bg, bg_mask, pipe_dp, rescale_to_min_depth=False, pad_width=None):
+    """
+    Inpaint a depth map in missing regions given a full RGB image as guidance.
+
+    Parameters
+    ----------
+    depth : (H, W) float32
+        Depth map with missing regions, assumed in [0, 1].
+    image_bg : (H, W, 3) uint8
+        Full RGB image with no missing regions.
+    bg_mask : (H, W) bool or uint8
+        True / 1 where depth is missing and should be inpainted.
+    pipe_dp : DepthEstimationInpaintPipeline
+        Infusion depth-inpainting pipeline from `instanciate_pipe_dp`.
+    rescale_to_min_depth : bool, default False
+        If True, rescale the predicted depth so it stays >= the original
+        minimum: depth_pred = min_depth + depth_pred * (1 - min_depth).
+    pad_width : int or None, default None
+        If set, wrap-pad the equirectangular inputs horizontally by this many
+        columns before calling the model, then unpad the output. Helps the
+        model handle the left/right seam of panoramas.
+
+    Returns
+    -------
+    depth_inpainted : (H, W) float32
+        Depth map with missing regions filled in.
+    """
+    eps = 1e-6
+    bg_mask  = np.asarray(bg_mask)
+    bg_mask[np.isnan(depth)] = True
+    depth    = np.asarray(depth, dtype=np.float32)
+    image_bg = np.asarray(image_bg)
+    mask     = bg_mask.astype(np.float32)
+    if mask.max() > 1.0:
+        mask = mask / 255.0
+    mask = np.clip(mask, 0.0, 1.0)
+
+    min_depth = float(np.nanmin(depth)) if rescale_to_min_depth else 0.0
+
+    # depth → true disparity (1/depth), normalised to [0, 1] using known pixels
+    depth_safe = np.nan_to_num(depth, nan=0.0)
+    disparity = 1.0 / (depth_safe + eps)
+    known = mask < 0.5
+    disp_min = float(disparity[known].min())
+    disp_max = float(disparity[known].max())
+    disparity_norm = (disparity - disp_min) / (disp_max - disp_min + eps)
+    disparity_norm[~known] = 0.0
+
+    if pad_width:
+        disparity_norm, mask, image_bg = ldi.pad_equirectangular(disparity_norm, pad_width=pad_width, mask=mask, rgb=image_bg)
+
+    pipe_out           = pipe_dp(input_image=image_bg, depth_numpy=disparity_norm, mask=mask)
+    disparity_pred_norm = np.asarray(pipe_out.depth_np, dtype=np.float32)
+
+    if pad_width:
+        disparity_pred_norm, _, _ = ldi.unpad_equirectangular(disparity_pred_norm, pad_width=pad_width)
+
+    # disparity → depth: undo normalisation then invert
+    disparity_pred = disparity_pred_norm * (disp_max - disp_min) + disp_min
+    depth_pred = 1.0 / (disparity_pred + eps)
+
+    if rescale_to_min_depth:
+        depth_pred = min_depth + depth_pred * (1.0 - min_depth)
+
+    return depth_pred
+
+
+def align_new_points_ABL_Hblend(
+        warped_img_interp,
+        warped_depth_interp,
+        pano_rgb_inpainted,
+        sky_mask_inpainted,
+        depth_estimated,
+        missing_info_mask,
+        camera_pose, 
+        height,
+        width,
+        sphere_radius,
+        upsampling_factor,
+        where_save=None,
+        ldi_depth=None,
+        ldi_colors=None,
+        ldi_mask=None,
+        ldi_sky_mask=None,
+        depth_blending_mode="naive",
+):
+    # sanity check (at original resolution, before any upsampling)
+
+
+    where_depth_nan = np.isnan(warped_depth_interp)
+    if np.any(where_depth_nan & (~missing_info_mask)):
+        print("WARNING: depth has NaNs in non-missing regions!")
+        print(f"Percent of NaNs: {np.mean(where_depth_nan & (~missing_info_mask))*100:.2f}%")
+        print("Expanding missing info mask to include these regions.")
+        missing_info_mask = missing_info_mask | where_depth_nan
+
+    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None or ldi_sky_mask is not None:
+        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None and ldi_sky_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask, ldi_sky_mask is provided, all must be provided."
+        where_ldi_depth_nan = np.isnan(ldi_depth)
+        if np.any(where_ldi_depth_nan & ldi_mask):
+            print("WARNING: ldi depth has NaNs in ldi regions!")
+            print(f"Percent of NaNs: {np.mean(where_ldi_depth_nan & ldi_mask)*100:.2f}%")
+            print("Expanding ldi mask to exclude these regions.")
+            ldi_mask = ldi_mask & ~where_ldi_depth_nan
+
+
+    he, wi = (1024, 2048)
+    # Ensure all inputs are at (he, wi) before depth filling, prior to the later upsampling
+    warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, he, wi, mode="bilinear")
+    depth_estimated     = my_utils.opencv_resize(depth_estimated,     he, wi, mode="bilinear")
+    pano_rgb_inpainted  = my_utils.opencv_resize(np.array(pano_rgb_inpainted, dtype=np.float32), he, wi, mode="bilinear").astype(np.uint8)
+    missing_info_mask   = my_utils.mask_resize(missing_info_mask,  he, wi)
+    sky_mask_inpainted  = my_utils.mask_resize(sky_mask_inpainted, he, wi)
+    if ldi_depth is not None:
+        ldi_depth  = my_utils.opencv_resize(ldi_depth,  he, wi, mode="bilinear")
+        ldi_colors = my_utils.opencv_resize(ldi_colors, he, wi, mode="bilinear")
+        ldi_mask   = my_utils.mask_resize(ldi_mask,     he, wi)
+        ldi_sky_mask = my_utils.mask_resize(ldi_sky_mask, he, wi)
+
+    # Depth filling at (he, wi) resolution
+    if depth_blending_mode == "naive":
+        blended_depth = np.zeros_like(warped_depth_interp)
+        blended_depth[missing_info_mask] = depth_estimated[missing_info_mask]
+        blended_depth[~missing_info_mask] = warped_depth_interp[~missing_info_mask]
+
+    elif depth_blending_mode == "interp_nearest":
+        blended_depth = ldi.interpolate_depth_nearest(
+            depth=warped_depth_interp,
+            bg_mask=missing_info_mask,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+    elif depth_blending_mode == "interp_bilinear_plus_nn":
+        blended_depth = ldi.interpolate_depth_bilinear_plus_nn(
+            depth=warped_depth_interp,
+            bg_mask=missing_info_mask,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+
+    elif depth_blending_mode == "inpaint":
+        blended_depth = ldi.interpolate_depth_nearest(
+            depth=warped_depth_interp,
+            bg_mask=missing_info_mask,
+            pad_width=config.ldi.depth_inpainting.pad_width,
+        )
+        # blended_depth = warped_depth_interp
+
+        pipe_dp = ldi.instanciate_pipe_dp()
+        blended_depth = inpaint_depth(
+            depth=np.nan_to_num(blended_depth, nan=0.0),
+            image_bg=pano_rgb_inpainted,
+            bg_mask=missing_info_mask,
+            pipe_dp=pipe_dp,
+            rescale_to_min_depth=True,
+        )
+
+    else:
+        raise ValueError(f"Unknown depth blending mode: {depth_blending_mode}")
+
+    # Upsampling (or resizing) to improve pcd density
+    new_colors = (np.array(pano_rgb_inpainted)/255.0)
+    new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    blended_depth = my_utils.opencv_resize(blended_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+    missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
+    sky_mask_inpainted = my_utils.mask_resize(sky_mask_inpainted, height*upsampling_factor, width*upsampling_factor)
+
+    if ldi_depth is not None:
+        ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
+        ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
+        ldi_sky_mask = my_utils.mask_resize(ldi_sky_mask, height*upsampling_factor, width*upsampling_factor)
+
+    pts_out = my_utils.depth2world(
+        depth=blended_depth, pose=camera_pose, sphere_radius=sphere_radius, height=height*upsampling_factor, width=width*upsampling_factor
+    )
+    pts_out = pts_out[missing_info_mask]
+    colors_out = new_colors[missing_info_mask]
+
+    res = {}
+    res['pts_out'] = pts_out
+    res['colors_out'] = colors_out
+    res['sky_mask_out'] = sky_mask_inpainted[missing_info_mask]
+
+    depth_pil = my_utils.depth_to_pil(blended_depth, cmap_name="plasma", vmin=0.1, vmax=1.8)
+    depth_pil.save(where_save / _phase_current / f"08_blended_depth_{depth_blending_mode}.png")
+
+
+    return res
 
 def align_new_points(
         warped_img_interp,
@@ -278,8 +469,16 @@ if __name__ == "__main__":
                 ldi_mask  = None
                 ldi_sky_mask = None
 
+            if config.phase2.ablate_hblending.apply:
+                align_fn = align_new_points_ABL_Hblend
+                add_kwargs = {
+                    "depth_blending_mode": config.phase2.ablate_hblending.depth_blending_mode,
+                }
+            else:
+                align_fn = align_new_points
+                add_kwargs = {}
 
-            res = align_new_points(
+            res = align_fn(
                 warped_img_interp=warped_img_interp,
                 warped_depth_interp=warped_depth_interp,
                 pano_rgb_inpainted=pano_rgb_inpainted,
@@ -296,6 +495,7 @@ if __name__ == "__main__":
                 ldi_colors=ldi_colors,
                 ldi_mask=ldi_mask,
                 ldi_sky_mask=ldi_sky_mask,
+                **add_kwargs,
             )
             new_pts=res['pts_out']
             new_colors=res['colors_out']
@@ -383,6 +583,10 @@ if __name__ == "__main__":
                 new_colors_neutral   = np.concatenate((new_colors_neutral,     new_colors_neutral_ldi), axis=0)
                 new_mask_neutral     = np.concatenate((new_mask_neutral_zeros, new_mask_neutral_ones), axis=0)
                 new_sky_mask_neutral = np.concatenate((new_sky_mask_neutral,   new_sky_mask_neutral_ldi), axis=0)
+            else:
+                new_mask_ldi1 = np.zeros(new_pts1.shape[:-1])
+                new_mask_ldi2 = np.zeros(new_pts2.shape[:-1])
+                new_mask_neutral = np.zeros(new_pts_neutral.shape[:-1])
 
             sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1, new_sky_mask1)
             sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2, new_sky_mask2)

@@ -1,0 +1,10 @@
+# ---meta---
+expname: debug
+
+# ----- args generation -----
+prompt: An endless arid environment of rolling sand dunes and cracked earth, shaped by wind and heat, with sparse vegetation, intense sunlight, and a vast open sky.
+
+num_dreams: 2
+pcd_upsampling_factor: 2
+
+
