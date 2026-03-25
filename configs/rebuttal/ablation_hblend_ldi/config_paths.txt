@@ -1,0 +1,16 @@
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi/sound_of_music_grass_field.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=naive/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=naive/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=naive/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=naive/sound_of_music_grass_field.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=interp_bilinear_plus_nn/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=interp_bilinear_plus_nn/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=interp_bilinear_plus_nn/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=interp_bilinear_plus_nn/sound_of_music_grass_field.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=inpaint/martian_badlands_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=inpaint/bioluminescent_forest_2.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=inpaint/phantom_opera_cave_river.yaml
+/home/a.schnepf/phd/SphericalDreamer/configs/rebuttal/ablation_hblend_ldi/ldi+hblend=inpaint/sound_of_music_grass_field.yaml

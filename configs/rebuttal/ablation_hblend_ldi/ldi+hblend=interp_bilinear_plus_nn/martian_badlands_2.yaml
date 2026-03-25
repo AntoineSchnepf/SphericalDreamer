@@ -1,4 +1,4 @@
-expname: ABL_Hblend--martian_badlands_2
+expname: ABL_HblendLdi--martian_badlands_2--ldi+hblend=interp_bilinear_plus_nn
 load_phase1a_from: null
 load_phase1b_from: null
 load_phase2a_from: null
@@ -6,15 +6,14 @@ load_phase2b_from: null
 load_phase2c_from: null
 load_phase3_from: null
 num_dreams: 3
+phase1:
+  apply_ldi: false
+phase2:
+  ablate_hblending:
+    apply: true
+    depth_blending_mode: interp_bilinear_plus_nn
+  apply_ldi: false
 prompt: A Martian landscape of rust-red and ochre soil, scattered with dark basalt
   rocks and patches of muted green and purple alien vegetation, under a dusty salmon-colored
   sky.
-  
-save_dir: OUTPUTS/SphericalDreamerRecurse/ablation_hblend
-
-
-phase2:   
-  apply_ldi: False
-
-
-
+save_dir: OUTPUTS/SphericalDreamerRecurse/ablation_hblend_ldi

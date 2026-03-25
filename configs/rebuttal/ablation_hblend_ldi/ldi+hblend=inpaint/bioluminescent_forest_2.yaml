@@ -1,0 +1,20 @@
+expname: ABL_HblendLdi--bioluminescent_forest_2--ldi+hblend=inpaint
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+phase1:
+  apply_ldi: false
+phase2:
+  ablate_hblending:
+    apply: true
+    depth_blending_mode: inpaint
+  apply_ldi: false
+prompt: An alien forest illuminated by bioluminescence, with tall plant trunks in
+  deep indigo and emerald tones, broad leaves glowing in cyan and turquoise, and soft
+  violet light diffusing through a dense canopy, creating a luminous, otherworldly
+  atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/ablation_hblend_ldi
