@@ -1,0 +1,129 @@
+expname: phantom_opera_cave_river
+num_dreams: 0
+phase5v2:
+  render_settings:
+    min_near_plane: 0.001
+    keep_ratio: 1.0
+    width: 1600
+    height: 800
+    point_size: 0.0022
+  custom_trajectory:
+    enable: true
+    eqr_resolution:
+      width: 2048
+      height: 1024
+    positions:
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 18.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 36.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 54.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 72.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 90.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 108.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 126.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 144.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 162.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 180.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 198.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 216.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 234.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 252.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 270.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 288.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 306.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 324.0
+    - - 0.05
+      - 0.0
+      - 0.0
+      - 0.0
+      - 342.0
+    render_eqr_too: false
+  custom_world:
+    enable: true
+    scene_type: sphericaldreamer
+    world_path: /home/a.schnepf/phd/SphericalDreamer/OUTPUTS/SphericalDreamerRecurse/ablation_hblend_ldi/phantom_opera_cave_river/3_final_dream_pcd_unfiltered.ply
+    scale_factor: 1.0
+  nfs_dataset:
+    fov_deg: 54.2
+    bg_color:
+    - 0
+    - 0
+    - 0
+    - 0
+save_dir: OUTPUTS/X_ICML_RENDERS/quantitative_ABL_hlblend_ldi/rot

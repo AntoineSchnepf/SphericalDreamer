@@ -93,19 +93,24 @@ def _resample_positions_linear(positions, n_out):
     return out
 
 
+
 EXPNAMES = [
+    "bioluminescent_forest_2",
     "ABL_HblendLdi--bioluminescent_forest_2--ldi",
     "ABL_HblendLdi--bioluminescent_forest_2--ldi+hblend=inpaint",
     "ABL_HblendLdi--bioluminescent_forest_2--ldi+hblend=interp_bilinear_plus_nn",
     "ABL_HblendLdi--bioluminescent_forest_2--ldi+hblend=naive",
+    "martian_badlands_2",
     "ABL_HblendLdi--martian_badlands_2--ldi",
     "ABL_HblendLdi--martian_badlands_2--ldi+hblend=inpaint",
     "ABL_HblendLdi--martian_badlands_2--ldi+hblend=interp_bilinear_plus_nn",
     "ABL_HblendLdi--martian_badlands_2--ldi+hblend=naive",
+    "phantom_opera_cave_river",
     "ABL_HblendLdi--phantom_opera_cave_river--ldi",
     "ABL_HblendLdi--phantom_opera_cave_river--ldi+hblend=inpaint",
     "ABL_HblendLdi--phantom_opera_cave_river--ldi+hblend=interp_bilinear_plus_nn",
     "ABL_HblendLdi--phantom_opera_cave_river--ldi+hblend=naive",
+    "sound_of_music_grass_field",
     "ABL_HblendLdi--sound_of_music_grass_field--ldi",
     "ABL_HblendLdi--sound_of_music_grass_field--ldi+hblend=inpaint",
     "ABL_HblendLdi--sound_of_music_grass_field--ldi+hblend=interp_bilinear_plus_nn",
