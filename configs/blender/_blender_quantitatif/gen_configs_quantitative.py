@@ -269,9 +269,9 @@ def get_scenescape_rot_trans_positions(expname):
 
 # SPHERICAL DREAMER
 SPHERICALDREAMER_X_INIT = 0.0
-SPHERICALDREAMER_X_INIT_X_END = 3.14-0.05
+SPHERICALDREAMER_X_END = 3.14-0.05
 def get_spherical_dreamer_trans_positions(expname):
-    les_x = np.linspace(SPHERICALDREAMER_X_INIT, SPHERICALDREAMER_X_INIT_X_END, num=NUM_ROT_AND_TRANS)
+    les_x = np.linspace(SPHERICALDREAMER_X_INIT, SPHERICALDREAMER_X_END, num=NUM_ROT_AND_TRANS)
     positions = []
     for x in les_x:
         positions.append([float(x), 0.0, 0.0, 0.0, 0.0])
@@ -323,7 +323,7 @@ def get_world_save_name(scene_type):
         return "pcd.ply"
 
 
-BASE_PATH = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/_blender_quantitatif")
+BASE_PATH = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/blender/_blender_quantitatif")
 SPHERICAL_DREAMER_DOWNSAMPLE = False
 TRAJ_TYPES = ['rot', 'trans', 'rot+trans']
 HEIGHT = 800

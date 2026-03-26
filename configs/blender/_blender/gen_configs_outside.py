@@ -35,24 +35,24 @@ def yaml_load(path):
         return yaml.safe_load(f)
     
 PROMPTS = {
-    "dense_rainforest_understory": (
-        "A dense rainforest understory extending forward and behind the observer, thick "
-        "overlapping vegetation with no sharp edges, large leaves in deep green tones, moist "
-        "ground covered in roots and organic debris, overcast sky filtering light through "
-        "the canopy, soft diffused illumination, humid and lush atmosphere, immersive tropical "
-        "environment."
-    ),
-    "coral_reef_canyon": (
-        "A wide coral reef canyon extending forward and behind the observer, smooth "
-        "rock walls covered in coral and marine growth, vibrant yet softened colors including "
-        "turquoise, coral pink, and sandy beige, filtered underwater lighting with soft light "
-        "rays, floating particles in the water, calm immersive oceanic environment."
-    ),
-    "martian_badlands_2": (
-        "A Martian landscape of rust-red and ochre soil, scattered with dark basalt "
-        "rocks and patches of muted green and purple alien vegetation, under a dusty salmon-colored "
-        "sky."
-    ),
+    # "dense_rainforest_understory": (
+    #     "A dense rainforest understory extending forward and behind the observer, thick "
+    #     "overlapping vegetation with no sharp edges, large leaves in deep green tones, moist "
+    #     "ground covered in roots and organic debris, overcast sky filtering light through "
+    #     "the canopy, soft diffused illumination, humid and lush atmosphere, immersive tropical "
+    #     "environment."
+    # ),
+#     "coral_reef_canyon": (
+#         "A wide coral reef canyon extending forward and behind the observer, smooth "
+#         "rock walls covered in coral and marine growth, vibrant yet softened colors including "
+#         "turquoise, coral pink, and sandy beige, filtered underwater lighting with soft light "
+#         "rays, floating particles in the water, calm immersive oceanic environment."
+#     ),
+#     "martian_badlands_2": (
+#         "A Martian landscape of rust-red and ochre soil, scattered with dark basalt "
+#         "rocks and patches of muted green and purple alien vegetation, under a dusty salmon-colored "
+#         "sky."
+#     ),
     "phantom_opera_cave_river": (
         "A large-scale 3D subterranean cave environment inspired by the Phantom of "
         "the Opera underground river setting, with no visible people or animals, an irregular "
@@ -65,24 +65,24 @@ PROMPTS = {
         "deep shadows fading into darkness, cinematic gothic mood, immersive enclosed underground "
         "atmosphere with realistic rock and water textures and strong spatial depth."
     ),
-    "sound_of_music_grass_field": (
-        "A wide open rolling field of lush green grass inspired by The Sound of Music, "
-        "gentle natural hills extending forward and continuing behind the observer with no "
-        "harsh edges or defined geometry, thick healthy grass blades forming smooth wind-like "
-        "patterns, scattered wildflower hints subtle and sparse, cloudy sky overhead with "
-        "no visible sun, soft diffused daylight creating even illumination and minimal harsh "
-        "shadows, distant tree line barely visible on the horizon, peaceful cinematic pastoral "
-        "mood, realistic vegetation textures, immersive open countryside atmosphere."
-    ),
-    "upside_down_stranger_things": (
-        "A desolate Upside Down-inspired landscape with cloudy oppressive skies and "
-        "no visible sun, the environment stretching forward and behind the observer with "
-        "organic uneven terrain, dark damp ground covered in tangled root-like growth and "
-        "soft alien debris, floating ash-like particles suspended in the air, twisted vegetation "
-        "silhouettes without sharp geometry, murky fog reducing visibility in the distance, "
-        "muted blue-gray lighting with eerie contrast, wet reflective patches and slimy textures, "
-        "cinematic horror mood, immersive otherworldly atmosphere."
-    ),
+#     "sound_of_music_grass_field": (
+#         "A wide open rolling field of lush green grass inspired by The Sound of Music, "
+#         "gentle natural hills extending forward and continuing behind the observer with no "
+#         "harsh edges or defined geometry, thick healthy grass blades forming smooth wind-like "
+#         "patterns, scattered wildflower hints subtle and sparse, cloudy sky overhead with "
+#         "no visible sun, soft diffused daylight creating even illumination and minimal harsh "
+#         "shadows, distant tree line barely visible on the horizon, peaceful cinematic pastoral "
+#         "mood, realistic vegetation textures, immersive open countryside atmosphere."
+#     ),
+#     "upside_down_stranger_things": (
+#         "A desolate Upside Down-inspired landscape with cloudy oppressive skies and "
+#         "no visible sun, the environment stretching forward and behind the observer with "
+#         "organic uneven terrain, dark damp ground covered in tangled root-like growth and "
+#         "soft alien debris, floating ash-like particles suspended in the air, twisted vegetation "
+#         "silhouettes without sharp geometry, murky fog reducing visibility in the distance, "
+#         "muted blue-gray lighting with eerie contrast, wet reflective patches and slimy textures, "
+#         "cinematic horror mood, immersive otherworldly atmosphere."
+#     ),
 }
 
 
@@ -97,35 +97,22 @@ def make_position_product_with_azis(base_positions):
     return positions
 
 def get_scenescape_positions(expname):
-    scenescape_base_positions = yaml_load(f"/home/a.schnepf/phd/experiments/{expname}/scenescape/camera_poses_xyz_elev_azi.yaml")['positions']
-    return make_position_product_with_azis(scenescape_base_positions)
+    return [[0.0, -0.3, 0.0, 0.0, 0.0]]
 
-WONDERJOURNEY_BASE_POSITIONS = [
-    [0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.1875, 0.0, 0.0, 0.0, 0.0],
-    [-0.375, 0.0, 0.0, 0.0, 0.0],
-]
 def get_wonderjourney_positions(expname):
-    return make_position_product_with_azis(WONDERJOURNEY_BASE_POSITIONS)
+    return [[-0.0, -1.0, 0.0, 0.0, 0.0]]
 
 def get_sphericaldreamer_positions(num_dreams = 3, n_x=4):
-    min_x = 0
-    max_x = 1.57 * (num_dreams-1)
-    les_x = [0.05, 3.14-0.05]
-    positions = []
-    for x in les_x:
-        for azi in [0, 90, 180, 270]:
-            positions.append([float(x), 0.0, 0.05, 0.0, azi])
-    return positions
+    return [[1.57, -10.0, 3.0, -15, 90]]
     
 
-SPHERICAL_DREAMER_DOWNSAMPLE = True
+SPHERICAL_DREAMER_DOWNSAMPLE = False
 for scene_type in ["wonderjourney", "scenescape", "sphericaldreamer"]:
 
 
 
-    CFG_DIR = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/_blender/{scene_type}")
-    CONFIG_IN = CFG_DIR / ".." / "example.yaml"
+    CFG_DIR = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/blender/_blender/outside/{scene_type}")
+    CONFIG_IN = "/home/a.schnepf/phd/SphericalDreamer/configs/blender/_blender/example.yaml"
 
 
     cfg_names = []  # <-- collect generated configs
@@ -155,11 +142,12 @@ for scene_type in ["wonderjourney", "scenescape", "sphericaldreamer"]:
 
         UPDATES = {
             'positions' : positions,
-            "expname": expname,
+            "expname": f"{expname}_outside",
             "scene_type": scene_type,
             "world_path": f"/home/a.schnepf/phd/experiments/{expname}/{scene_type}/{word_save_name}",   
             "keep_ratio": 
             0.9 if (scene_type == "sphericaldreamer" and SPHERICAL_DREAMER_DOWNSAMPLE) else 1.0,
+
         }
 
         cfg = yaml_load(CONFIG_IN)
@@ -169,10 +157,18 @@ for scene_type in ["wonderjourney", "scenescape", "sphericaldreamer"]:
         cfg['phase5v2']['custom_world']['scene_type'] = UPDATES['scene_type']
         cfg['phase5v2']['custom_world']['world_path'] = UPDATES['world_path']
         cfg['phase5v2']['render_settings']['keep_ratio'] = UPDATES['keep_ratio']
+        cfg['phase5v2']['custom_trajectory']['render_eqr_too'] = False if scene_type == "sphericaldreamer" else True
+        cfg['phase5v2']['custom_trajectory']['eqr_resolution']['width'] = 2048*2
+        cfg['phase5v2']['custom_trajectory']['eqr_resolution']['height'] = 1024*2
+        cfg['save_dir'] = f"OUTPUTS/X_ICML_RENDERS/outside"
+        cfg['phase5v2']['render_settings']['width'] = 1920
+        cfg['phase5v2']['render_settings']['height'] = 1080
+        cfg['phase5v2']['nfs_dataset']['bg_color'] = [0,0,0,0]
         cfg['phase5v2']['render_settings']['point_size'] = 0.0022 *  15 if scene_type == 'wonderjourney' else 0.0022 
-        cfg['save_dir'] = f"OUTPUTS/X_ICML_RENDERS/qualitative"
 
-        save_config(cfg, cfg_name=f"{expname}.yaml", save_dir=CFG_DIR)
+        cfg['phase5v2']['render_settings']['save_rgba'] = True
+
+        save_config(cfg, cfg_name=f"{expname}_outside.yaml", save_dir=CFG_DIR)
         cfg_names.append(f"{expname}.yaml")
         print(f"Saved config for {expname}")
 
