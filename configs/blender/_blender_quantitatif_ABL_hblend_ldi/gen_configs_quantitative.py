@@ -208,7 +208,7 @@ BASE_PATH = Path(f"/home/a.schnepf/phd/SphericalDreamer/configs/blender/_blender
 SPHERICAL_DREAMER_DOWNSAMPLE = False
 TRAJ_TYPES = ['rot', 'trans', 'rot+trans']
 HEIGHT = 800
-WIDTH = 1600 
+WIDTH = 800
 
 
 
