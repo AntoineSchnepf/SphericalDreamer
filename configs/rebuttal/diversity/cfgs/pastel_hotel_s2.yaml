@@ -1,0 +1,17 @@
+expname: pastel_hotel_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Wes Anderson-style pastel grand hotel lobby, rigidly symmetrical interior
+  with a central staircase splitting left and right under an ornate plaster ceiling
+  rosette, walls painted in matte powder-pink with mint-green trim, geometric terrazzo
+  floors in coral and cream, a mahogany concierge desk with brass bell and neatly
+  stacked vintage luggage, potted palms flanking every doorway, a uniformed bellhop
+  elevator with brass accordion gate, palette of millennial pink, pistachio green,
+  and mustard yellow, whimsical meticulously composed artifice.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

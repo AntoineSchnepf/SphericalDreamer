@@ -1,0 +1,17 @@
+expname: viking_longhouse_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Viking longhouse interior during a winter feast, massive rough-hewn timber
+  beams and thick turf walls blackened by decades of smoke, a long central hearth
+  blazing with crackling flames illuminating rows of heavy oak tables laden with clay
+  pitchers and wooden platters, animal pelts and woven tapestries draped over benches,
+  iron weapons and painted wooden shields mounted on the walls, thick smoke collecting
+  under the ridge beam, palette of fire-orange, charcoal, and weathered oak brown,
+  raucous communal warmth.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

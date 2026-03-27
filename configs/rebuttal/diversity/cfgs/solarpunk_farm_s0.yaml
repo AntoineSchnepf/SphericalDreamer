@@ -1,0 +1,17 @@
+expname: solarpunk_farm_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A vertical solarpunk farm tower interior, tiered hydroponic platforms spiraling
+  upward around a central light well, leafy greens and flowering crops growing under
+  banks of warm-spectrum LED panels, misting systems creating a fine humid haze, bamboo
+  structural elements and recycled aluminum railings, workers in bright coveralls
+  tending the crops, sunlight streaming in from faceted glass panels on the exterior
+  wall, palette of chlorophyll green, warm LED- amber, and clean aluminum-silver,
+  optimistic sustainable abundance.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

@@ -1,0 +1,17 @@
+expname: nautilus_shell_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: The interior of a colossal fossilized nautilus shell, spiraling ribbed walls
+  of pearlescent bone-white and pale amber, smooth organic curves receding into a
+  luminous central chamber, shallow tide pools on the ridged floor reflecting iridescent
+  nacre patterns, soft diffused light entering from the wide opening, delicate stalactite-like
+  calcium formations hanging from the ceiling, fine sea spray suspended in the air,
+  muted pearl and champagne palette with turquoise water accents, dreamlike surreal
+  serenity.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

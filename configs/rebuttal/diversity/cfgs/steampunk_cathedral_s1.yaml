@@ -1,0 +1,17 @@
+expname: steampunk_cathedral_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A steampunk clockwork cathedral, soaring nave lined with massive interlocking
+  brass gears and copper flywheels turning slowly behind glass panels, wrought-iron
+  pews and a pipe-organ facade built from pressure valves and steam whistles, stained-glass
+  windows depicting mechanical schematics in amber and emerald, jets of white steam
+  hissing from ceiling vents, gaslamp chandeliers with exposed filaments, palette
+  of polished brass, verdigris copper, and warm gaslight-amber, reverent mechanical
+  grandeur.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

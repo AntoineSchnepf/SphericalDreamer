@@ -1,0 +1,17 @@
+expname: alchemist_workshop_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A medieval alchemist's tower workshop at midnight, a narrow cylindrical room
+  with rough stone walls lined with sagging timber shelves crammed with glass alembics,
+  leather-bound grimoires, and jars of dried herbs and mineral powders, a copper distillation
+  apparatus bubbling over a low coal fire casting dancing amber light, star charts
+  and anatomical drawings pinned to every surface, candle wax pooled on the workbench,
+  smoky air thick with aromatic residue, palette of tarnished copper, parchment yellow,
+  and soot-black, obsessive scholarly chaos.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

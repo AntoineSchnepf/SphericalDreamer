@@ -1555,6 +1555,9 @@ def lama_flux_double_inpainting_p2(
             **viz_kwargs,
             save_path=save_path/"08_lama_flux_double_inpainting.png",
         )
+        # also save the inpainting mask as numpy and PILLOW image
+        np.save(save_path/"08_inpainting_mask.npy", mask_smooth_pil)
+        mask_smooth_pil.save(save_path/"08_inpainting_mask.png")
 
     return inpaint_pano_flux_pil, mask_smooth_pil
 

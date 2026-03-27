@@ -1,0 +1,17 @@
+expname: zerogravity_chapel_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A zero-gravity chapel floating in deep space, a cylindrical chamber where
+  pews and altar drift untethered in microgravity, stained-glass panels set into the
+  hull casting colored light from nearby stars in slow rotation, candle flames replaced
+  by hovering spheres of warm bioluminescent liquid, prayer books and rosaries floating
+  in gentle tumble, a crucifix suspended at the center axis catching light from all
+  directions, palette of stained-glass jewel tones against void-black, weightless
+  sacred stillness.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

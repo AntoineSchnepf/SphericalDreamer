@@ -1,0 +1,16 @@
+expname: baroque_opera_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Baroque Viennese opera house in full candlelit splendor, five tiers of gilded
+  balconies curving around a horseshoe auditorium, ceiling frescoes of heavenly clouds
+  and rosy cherubs framed in white and gold rococo plasterwork, red velvet seats and
+  heavy curtains in cardinal crimson, thousands of candles in a massive crystal chandelier
+  casting warm flickering light, polished parquet floors and marble columns, palette
+  of gold, cream, and deep red, intoxicating theatrical grandeur.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

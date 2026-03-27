@@ -1,0 +1,12 @@
+expname: stone_pillar_desert_2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: An arid desert filled with tall stone pillars in warm sandstone, amber, and
+  reddish-brown hues, standing on a pale beige ground beneath a bright, sun-bleached
+  sky.
+save_dir: OUTPUTS/SphericalDreamerRecurse/ldi_viz/

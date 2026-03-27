@@ -1,0 +1,16 @@
+expname: pharaoh_tomb_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: An Egyptian pharaoh's burial chamber deep inside a pyramid, massive sandstone
+  walls covered in hieroglyphic carvings painted in faded ochre, lapis lazuli, and
+  malachite green, a granite sarcophagus at the center surrounded by gilded canopic
+  jars and stacked wooden chests, flickering oil lamp light casting long sharp shadows
+  across the low ceiling, fine dust suspended in warm amber beams, palette of desert
+  gold, deep blue, and burnt sienna, sacred eternal silence.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

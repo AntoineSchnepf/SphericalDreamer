@@ -1,0 +1,17 @@
+expname: moroccan_medina_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A narrow Moroccan medina passageway in Fez, towering plastered walls in sun-
+  bleached white and dusty blue close together overhead nearly touching, shafts of
+  bright sunlight slicing down between buildings, carved wooden doors studded with
+  iron nails, stacks of hand-dyed leather goods and ceramic tagine pots displayed
+  on stone ledges, intricate zellige tilework in turquoise and saffron on fountain
+  niches, warm sandstone underfoot worn smooth, palette of cobalt blue, terracotta,
+  and bleached white, labyrinthine sensory richness.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

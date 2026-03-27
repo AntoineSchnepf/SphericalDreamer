@@ -1,0 +1,16 @@
+expname: cloud_monastery_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A remote mountain monastery floating above an endless sea of white clouds
+  at sunrise, weathered stone terraces and pagoda rooftops with curved eaves in faded
+  cinnabar red, prayer flags in sun-bleached primary colors stretching between towers,
+  ancient timber columns and worn stone steps, golden dawn light breaking horizontally
+  through mist, snow-capped peaks piercing the cloud layer in the far distance, crisp
+  thin air, warm saffron and cool slate-blue palette, elevated contemplative stillness.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

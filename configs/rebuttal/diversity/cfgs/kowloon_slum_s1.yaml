@@ -1,0 +1,17 @@
+expname: kowloon_slum_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Kowloon-style vertical slum interior, an impossibly dense warren of stacked
+  apartments connected by narrow walkways and exposed staircases, tangled electrical
+  wires and water pipes running in every direction, neon signs in Chinese characters
+  glowing pink and green through the haze, tiny shop fronts and dentist offices stacked
+  above each other, dripping air conditioners and hanging laundry, dim light filtering
+  down from far above, palette of concrete gray, neon pink, and grime-yellow, claustrophobic
+  human density.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

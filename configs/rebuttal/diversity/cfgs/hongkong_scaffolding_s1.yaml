@@ -1,0 +1,17 @@
+expname: hongkong_scaffolding_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Hong Kong bamboo scaffolding canyon, a narrow street flanked by buildings
+  wrapped floor to ceiling in dense bamboo pole scaffolding lashed with nylon straps,
+  green construction netting billowing in the wind, workers' hard hats and tools hanging
+  from hooks, neon shop signs poking through gaps in the scaffolding, pedestrians
+  navigating the tunnel-like sidewalk below, warm afternoon light filtering through
+  the bamboo lattice casting striped shadows, palette of bamboo-gold, netting-green,
+  and urban gray, vertical organized chaos.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911
