@@ -1,0 +1,17 @@
+expname: psychiatric_ward_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: An abandoned early 20th-century psychiatric ward, a long corridor with cracked
+  institutional green tiles running waist-high on plaster walls peeling in wide strips,
+  rows of heavy iron-framed doors with small observation windows, overturned metal
+  bed frames and scattered patient files in a flooded ward, water-damaged ceiling
+  panels sagging and dripping, harsh fluorescent fixtures hanging by wires, palette
+  of asylum green, yellowed white, and rust-stained gray, profoundly unsettling institutional
+  decay.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

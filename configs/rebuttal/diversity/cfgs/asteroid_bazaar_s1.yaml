@@ -1,0 +1,16 @@
+expname: asteroid_bazaar_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: An alien marketplace inside a hollowed-out asteroid, cavernous irregular rock
+  walls studded with bioluminescent fungal growths in violet and teal, suspended platforms
+  connected by rope bridges and antigravity lifts, vendor stalls built from salvaged
+  spacecraft hull panels displaying crystalline goods under pulsing light, diverse
+  alien silhouettes moving through thick atmospheric haze, palette of asteroid-gray,
+  bioluminescent purple, and plasma-teal, exotic interstellar commerce.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

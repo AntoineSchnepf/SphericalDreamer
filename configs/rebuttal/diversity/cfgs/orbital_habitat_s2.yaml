@@ -1,0 +1,16 @@
+expname: orbital_habitat_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: The interior of a rotating orbital habitat ring, a curved landscape stretching
+  upward in both directions with low suburban houses, garden plots, and artificial
+  lakes bending impossibly overhead until they meet above, simulated daylight from
+  a central luminous axis, a gentle breeze from atmospheric processors, the subtle
+  wrongness of a horizon that curves up, palette of suburban green, sky-simulation
+  blue, and warm residential tones, uncanny artificial normalcy in deep space.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

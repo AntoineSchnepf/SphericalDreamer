@@ -1,0 +1,16 @@
+expname: victorian_conservatory_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A grand Victorian glass conservatory consumed by tropical overgrowth, wrought-iron
+  framework and arched glass panes clouded with algae and cracked in places, massive
+  ferns and palm fronds pressing against the ceiling, roots buckling the tiled floor,
+  thick humid air with visible moisture droplets catching green-filtered sunlight,
+  rusted iron benches and toppled marble planters half-buried in foliage, palette
+  of deep emerald, oxidized copper, and warm terracotta, romantic botanical decay.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

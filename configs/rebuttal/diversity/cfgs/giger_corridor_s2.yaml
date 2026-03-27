@@ -1,0 +1,16 @@
+expname: giger_corridor_s2
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A biomechanical corridor in the style of H.R. Giger, ribbed organic walls
+  fused seamlessly with mechanical pistons and hydraulic tubes, surfaces of dark glossy
+  resin textured like stretched skin over bone, translucent membrane panels pulsing
+  with faint amber bioluminescence, floor grating revealing tendon-like cables beneath,
+  condensation and viscous fluid dripping from ceiling protrusions, palette of obsidian-black,
+  bone-gray, and sickly amber, deeply unsettling alien-organic menace.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 731056

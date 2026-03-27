@@ -1,0 +1,16 @@
+expname: london_alley_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A fog-soaked Victorian London alley at night, cobblestone lane glistening
+  wet under gaslight from ornate iron lamp posts, tall soot-blackened brick buildings
+  with narrow sash windows, a pub sign creaking in the wind, wooden barrel and crates
+  stacked against a wall, thick yellow-gray fog reducing everything beyond ten meters
+  to silhouette, warm amber gaslight halos in the mist, palette of soot-black, gaslight-amber,
+  and fog-gray, Jack the Ripper atmospheric menace.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

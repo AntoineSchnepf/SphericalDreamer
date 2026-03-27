@@ -1,0 +1,16 @@
+expname: detroit_factory_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Detroit abandoned automotive factory district, a vast open-plan assembly
+  floor with rusted overhead cranes and broken conveyor rails, concrete pillars tagged
+  with layered graffiti in vivid spray-paint colors, smashed windows letting in cold
+  flat daylight, weeds pushing through cracks in the oil-stained floor, scattered
+  car chassis parts and abandoned tool cribs, palette of industrial rust, concrete
+  gray, and vivid graffiti primaries, post-industrial American collapse.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

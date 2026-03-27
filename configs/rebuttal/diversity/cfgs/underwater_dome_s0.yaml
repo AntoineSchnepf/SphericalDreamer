@@ -1,0 +1,17 @@
+expname: underwater_dome_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: An underwater glass dome habitat on an ocean floor, a transparent geodesic
+  ceiling revealing dark blue water and passing schools of luminescent jellyfish above,
+  modular living quarters with warm interior lighting and potted plants under grow
+  lamps, metal grated walkways over an aquarium floor, condensation running down the
+  curved glass panels, bioluminescent coral growing on the exterior framework visible
+  through the dome, palette of deep ocean-blue, warm habitat-amber, and jellyfish-cyan,
+  isolated aquatic sanctuary.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

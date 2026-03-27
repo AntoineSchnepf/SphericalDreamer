@@ -1,0 +1,16 @@
+expname: cyberpunk_market_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A bustling cyberpunk night market in a narrow alley between towering megastructures,
+  holographic signs and neon kanji flickering in electric pink, teal, and hot orange,
+  tangled cables and steam pipes overhead dripping condensation, vendor stalls with
+  glowing display cases and synthetic food under UV light, wet asphalt reflecting
+  a kaleidoscope of color, crowds reduced to silhouettes in the haze, smog and vapor
+  mixing in the saturated air, chaotic sensory-overload atmosphere.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911

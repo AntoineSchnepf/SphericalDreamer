@@ -1,0 +1,17 @@
+expname: mumbai_chawl_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A Mumbai tenement chawl corridor at dusk, a long open-air gallery running
+  along the upper floor of a dense residential block, weathered wooden doors painted
+  in faded turquoise and rust-red opening onto tiny apartments, metal clotheslines
+  crisscrossing overhead heavy with colorful saris and bedsheets, bare incandescent
+  bulbs strung on wires casting warm pools of light, cooking smoke and incense mixing
+  in the humid air, palette of warm turmeric-yellow, faded teal, and weathered brown,
+  dense communal life.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

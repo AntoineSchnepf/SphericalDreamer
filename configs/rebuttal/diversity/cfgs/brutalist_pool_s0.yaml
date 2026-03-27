@@ -1,0 +1,17 @@
+expname: brutalist_pool_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A drained Olympic swimming complex from the 1970s, a vast brutalist concrete
+  interior with an empty turquoise-tiled pool revealing stained grout lines and a
+  cracked diving platform, rows of molded plastic spectator seats in faded orange
+  and brown, exposed raw concrete walls with geometric formwork patterns, shattered
+  glass skylights letting in shafts of cold daylight, puddles of stagnant water reflecting
+  the ceiling grid, palette of concrete gray, chlorine blue, and rusted orange, echoing
+  abandoned ambition.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

@@ -1,0 +1,17 @@
+expname: mission_control_s0
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A retro Apollo-era mission control room, tiered rows of heavy steel consoles
+  with monochrome CRT screens showing orbital trajectory data, backlit push buttons
+  in amber and red, rotary phone handsets in cradles, a massive projection screen
+  showing Earth from orbit on the front wall, low acoustic tile ceiling with recessed
+  fluorescent lighting, ashtrays and coffee cups on every desk, thin cigarette haze
+  in the recycled air, palette of mission- control gray, screen-green, and warning-red,
+  high-stakes analog tension.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 119224

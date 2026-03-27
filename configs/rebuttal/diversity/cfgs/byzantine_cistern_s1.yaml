@@ -1,0 +1,16 @@
+expname: byzantine_cistern_s1
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 2
+prompt: A vast Byzantine underground cistern with hundreds of columns rising from
+  dark still water, carved Corinthian capitals repurposed from ancient temples supporting
+  low brick vaults, dim orange spotlights reflecting off the glassy surface creating
+  shimmering patterns on the ceiling, dripping water echoing in the darkness, fish
+  shadows moving below the surface, palette of amber reflection, stone-gray, and deep
+  aquatic black, subterranean monumental silence.
+save_dir: OUTPUTS/SphericalDreamerRecurse/diversity
+seed: 422911
