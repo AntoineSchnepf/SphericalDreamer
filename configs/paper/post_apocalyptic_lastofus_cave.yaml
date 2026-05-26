@@ -1,0 +1,18 @@
+expname: post_apocalyptic_lastofus_cave
+load_phase1a_from: null
+load_phase1b_from: null
+load_phase2a_from: null
+load_phase2b_from: null
+load_phase2c_from: null
+load_phase3_from: null
+num_dreams: 3
+prompt: A large-scale 3D post-apocalyptic cave inspired by The Last of Us, with no
+  visible people or animals, a wide cavern passage extending forward and continuing
+  behind the observer with immense depth, no sharp edges or well-defined geometry,
+  rounded wet rock formations with damp textures, collapsed debris and broken concrete
+  fragments suggesting human ruin reclaimed by nature, muddy ground with shallow water,
+  scattered stones and rubble, moss and fungal growth patches, roots hanging from
+  cracks, faint mist and dust in the air, dim natural light filtering from distant
+  openings creating soft beams, muted earthy palette, cinematic survival mood, immersive
+  claustrophobic atmosphere with realistic wet rock textures and environmental decay.
+save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/
