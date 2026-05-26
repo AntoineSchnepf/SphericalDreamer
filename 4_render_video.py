@@ -42,13 +42,6 @@ if __name__ == "__main__":
         PointCloud_instance = pickle.load(f)
 
     pcd = PointCloud_instance.get_o3d_pointcloud()
-    # Optionnaly: only render non-sky points
-    if config.phase4.exclude_sky_points:
-        sky_mask = PointCloud_instance.sky_mask
-        ind = np.where(sky_mask == False)[0]
-        pcd = pcd.select_by_index(ind)
-        printc(f"--- {_phase_current}: Excluded sky points for rendering. Remaining points: {len(pcd.points)}", color='yellow')
-
     printc(f"--- {_phase_current}: Loaded final point cloud in {time.time() - t0:.2f} seconds.", color='yellow')
 
 

@@ -14,7 +14,6 @@ from harmonic_blending import harmonic_blend_of_depths
 import my_utils
 from my_utils import printc
 import ldi_inpaiting as ldi
-from sky_segmentation import SkyMaskDetector
 
 # Disabling some warnings
 os.environ["GLOG_minloglevel"] = "2"
@@ -72,7 +71,7 @@ if __name__ == "__main__":
             for i in range(config.num_dreams):
                 printc(f"--- {_phase_current}: load image  {i:02d} / {config.num_dreams} ---", color='yellow')
 
-                img, depth_origin, _ = my_utils.load_rgbd_pano(
+                img, depth_origin = my_utils.load_rgbd_pano(
                     dream=i,
                     save_dir_=save_dir_,
                     phase=_phase_1a,
@@ -166,17 +165,6 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             print(f"FLUX inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
 
-
-            # -----------------------
-            #   3.5 GET SKY MASKS
-            # -----------------------
-            list_sky_mask = []
-            for i in range(config.num_dreams):
-                printc(f"--- {_phase_current}: Get sky mask  {i:02d} / {config.num_dreams} ---", color='yellow')
-                sky_mask = SkyMaskDetector.get_mask(
-                    image=list_inpaint_pano_pil[i],
-                )
-                list_sky_mask.append(sky_mask)
 
             # -------------------------------------------------
             # 4. DEPTH INPAINTING (at resolution 1024 * 2048)
@@ -303,7 +291,6 @@ if __name__ == "__main__":
                     pano_rgb_bg=list_inpaint_pano_pil[i],
                     depth_bg=list_depth_inpainted[i],
                     mask_bg=list_mask_inpaint_resized[i],
-                    sky_mask_bg=list_sky_mask[i],
                     dream=i,
                     save_dir_=save_dir_,
                     phase=_phase_current,

@@ -38,7 +38,6 @@ with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
     from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2, render_v1, render_v0
-from sky_segmentation import SkyMaskDetector
 
 _phase_1a = "1a"
 _phase_1b = "1b"
@@ -207,7 +206,7 @@ def render_and_inpaint_from_pose(
 def get_sphere(dream, save_dir_, config, height, width): 
 
     # 1. Load RGBD pano
-    colors, depth, sky_mask = my_utils.load_rgbd_pano(
+    colors, depth = my_utils.load_rgbd_pano(
         dream=dream,
         save_dir_=save_dir_,
         phase=_phase_1a
@@ -217,7 +216,6 @@ def get_sphere(dream, save_dir_, config, height, width):
     if config.pcd_upsampling_factor>1:
         colors = my_utils.opencv_resize(colors, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
         depth = my_utils.opencv_resize(depth, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
-        sky_mask = my_utils.mask_resize(sky_mask, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
     
     pts_carte = my_utils.depth2cam_carte(
         depth=depth,
@@ -227,10 +225,9 @@ def get_sphere(dream, save_dir_, config, height, width):
     )
     # 3. Outliers removal
     if config.phase1.outliers_removal.apply_on_fg:
-        pts_carte, colors, sky_mask = my_utils.GeometryTransforms.remove_statistical_outliers(
+        pts_carte, colors = my_utils.GeometryTransforms.remove_statistical_outliers(
             pts_carte,
             colors,
-            sky_mask=sky_mask,
             **config.phase1.outliers_removal.options
         )
 
@@ -238,11 +235,10 @@ def get_sphere(dream, save_dir_, config, height, width):
     to_cat = [pts_carte.reshape(-1, 3)]
     to_cat_colors = [colors.reshape(-1, 3)]
     to_cat_ldi_mask = [_mask_fg.reshape(-1)] 
-    to_cat_sky_mask = [sky_mask.reshape(-1)]
 
     # 4. (Optional) Load LDI background points and merge with foreground points
     if config.phase1.apply_ldi:
-        colors_bg, depth_bg, mask_bg, sky_mask_bg = my_utils.load_rgbd_ldi_pano(
+        colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
             dream=dream,
             save_dir_=save_dir_,
             phase=_phase_1b
@@ -252,7 +248,6 @@ def get_sphere(dream, save_dir_, config, height, width):
         colors_bg = my_utils.opencv_resize(colors_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
         depth_bg = my_utils.opencv_resize(depth_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor, mode='bilinear')
         mask_bg = my_utils.mask_resize(mask_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
-        sky_mask_bg = my_utils.mask_resize(sky_mask_bg, height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor)
                 
         pts_carte_bg = my_utils.depth2cam_carte(
             depth=depth_bg,
@@ -267,10 +262,9 @@ def get_sphere(dream, save_dir_, config, height, width):
 
         # (optional) outliers removal on background points
         if config.phase1.outliers_removal.apply_on_ldi:
-            pts_carte_bg, colors_bg, sky_mask_bg = my_utils.GeometryTransforms.remove_statistical_outliers(
+            pts_carte_bg, colors_bg = my_utils.GeometryTransforms.remove_statistical_outliers(
                 pts_carte_bg,
                 colors_bg,
-                sky_mask=sky_mask_bg,
                 **config.phase1.outliers_removal.options
             )
 
@@ -278,27 +272,23 @@ def get_sphere(dream, save_dir_, config, height, width):
         to_cat.append(pts_carte_bg.reshape(-1, 3))
         to_cat_colors.append(colors_bg.reshape(-1, 3))
         to_cat_ldi_mask.append(_mask_ldi.reshape(-1))
-        to_cat_sky_mask.append(sky_mask_bg.reshape(-1))
 
     # concatenate fg and bg points
     pts_carte, cat_meta = my_utils.concat_with_meta(*to_cat)    
     colors, _ = my_utils.concat_with_meta(*to_cat_colors)
     ldi_mask, _ = my_utils.concat_with_meta(*to_cat_ldi_mask)
-    sky_mask, _ = my_utils.concat_with_meta(*to_cat_sky_mask)
 
 
     # 5. Correction pipeline
-    pts_carte_corrected, colors_corrected, ldi_mask_corrected, sky_mask_corrected = my_utils.run_corrective_pipeline_on_sphere(
+    pts_carte_corrected, colors_corrected, ldi_mask_corrected = my_utils.run_corrective_pipeline_on_sphere(
         pts_carte, # in cartesian coordinates
         colors, 
         ldi_mask, 
-        sky_mask,
         **config.geometry_correction.sphere
     )
     sphere = my_utils.Sphere(
         None, pts_carte_corrected, colors_corrected, 
         ldi_mask=ldi_mask_corrected,
-        sky_mask=sky_mask_corrected,
         forward_carte=translation_direction,
         opening_kwargs=config.world_opening,
     )
@@ -469,8 +459,6 @@ if __name__ == "__main__":
             pano_rgb_inpainted        = res_render_inpaint['pano_rgb_inpainted']
             depth_estimated           = res_render_inpaint['depth_estimated']
 
-            sky_mask_inpainted = SkyMaskDetector.get_mask(pano_inpainted_raw)
-
             # 5. Save cache data for phase 2.B and 2.C
             sphere1.save_dict(save_dir__ / _phase_current / ".cache"/ "sphere1.pkl")
             sphere2.save_dict(save_dir__ / _phase_current / ".cache"/ "sphere2.pkl")
@@ -480,7 +468,6 @@ if __name__ == "__main__":
                 'warped_depth_interp'  : warped_depth_interp,
                 'missing_info_mask'    : missing_info_mask,
                 'pano_rgb_inpainted'   : pano_rgb_inpainted,
-                "sky_mask_inpainted"   : sky_mask_inpainted,
                 'depth_estimated'      : depth_estimated,
             })
 

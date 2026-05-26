@@ -125,7 +125,6 @@ def align_new_points_ABL_Hblend(
         warped_img_interp,
         warped_depth_interp,
         pano_rgb_inpainted,
-        sky_mask_inpainted,
         depth_estimated,
         missing_info_mask,
         camera_pose, 
@@ -137,7 +136,6 @@ def align_new_points_ABL_Hblend(
         ldi_depth=None,
         ldi_colors=None,
         ldi_mask=None,
-        ldi_sky_mask=None,
         depth_blending_mode="naive",
 ):
     # sanity check (at original resolution, before any upsampling)
@@ -150,8 +148,8 @@ def align_new_points_ABL_Hblend(
         print("Expanding missing info mask to include these regions.")
         missing_info_mask = missing_info_mask | where_depth_nan
 
-    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None or ldi_sky_mask is not None:
-        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None and ldi_sky_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask, ldi_sky_mask is provided, all must be provided."
+    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
+        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
         where_ldi_depth_nan = np.isnan(ldi_depth)
         if np.any(where_ldi_depth_nan & ldi_mask):
             print("WARNING: ldi depth has NaNs in ldi regions!")
@@ -166,12 +164,10 @@ def align_new_points_ABL_Hblend(
     depth_estimated     = my_utils.opencv_resize(depth_estimated,     he, wi, mode="bilinear")
     pano_rgb_inpainted  = my_utils.opencv_resize(np.array(pano_rgb_inpainted, dtype=np.float32), he, wi, mode="bilinear").astype(np.uint8)
     missing_info_mask   = my_utils.mask_resize(missing_info_mask,  he, wi)
-    sky_mask_inpainted  = my_utils.mask_resize(sky_mask_inpainted, he, wi)
     if ldi_depth is not None:
         ldi_depth  = my_utils.opencv_resize(ldi_depth,  he, wi, mode="bilinear")
         ldi_colors = my_utils.opencv_resize(ldi_colors, he, wi, mode="bilinear")
         ldi_mask   = my_utils.mask_resize(ldi_mask,     he, wi)
-        ldi_sky_mask = my_utils.mask_resize(ldi_sky_mask, he, wi)
 
     # Depth filling at (he, wi) resolution
     if depth_blending_mode == "naive":
@@ -217,13 +213,11 @@ def align_new_points_ABL_Hblend(
     new_colors = my_utils.opencv_resize(new_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
     blended_depth = my_utils.opencv_resize(blended_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
     missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
-    sky_mask_inpainted = my_utils.mask_resize(sky_mask_inpainted, height*upsampling_factor, width*upsampling_factor)
 
     if ldi_depth is not None:
         ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
         ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
         ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
-        ldi_sky_mask = my_utils.mask_resize(ldi_sky_mask, height*upsampling_factor, width*upsampling_factor)
 
     pts_out = my_utils.depth2world(
         depth=blended_depth, pose=camera_pose, sphere_radius=sphere_radius, height=height*upsampling_factor, width=width*upsampling_factor
@@ -234,7 +228,6 @@ def align_new_points_ABL_Hblend(
     res = {}
     res['pts_out'] = pts_out
     res['colors_out'] = colors_out
-    res['sky_mask_out'] = sky_mask_inpainted[missing_info_mask]
 
     depth_pil = my_utils.depth_to_pil(blended_depth, cmap_name="plasma", vmin=0.1, vmax=1.8)
     depth_pil.save(where_save / _phase_current / f"08_blended_depth_{depth_blending_mode}.png")
@@ -246,7 +239,6 @@ def align_new_points(
         warped_img_interp,
         warped_depth_interp,
         pano_rgb_inpainted,
-        sky_mask_inpainted,
         depth_estimated,
         missing_info_mask,
         camera_pose, 
@@ -258,7 +250,6 @@ def align_new_points(
         ldi_depth=None,
         ldi_colors=None,
         ldi_mask=None,
-        ldi_sky_mask=None,
 ):
     # 9. Blend depth
     new_colors = (np.array(pano_rgb_inpainted)/255.0)
@@ -268,7 +259,6 @@ def align_new_points(
     warped_depth_interp = my_utils.opencv_resize(warped_depth_interp, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
     depth_estimated = my_utils.opencv_resize(depth_estimated, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
     missing_info_mask = my_utils.mask_resize(missing_info_mask, height*upsampling_factor, width*upsampling_factor)
-    sky_mask_inpainted = my_utils.mask_resize(sky_mask_inpainted, height*upsampling_factor, width*upsampling_factor)
 
     # sanity check
     where_depth_nan_resized = np.isnan(warped_depth_interp)
@@ -279,12 +269,11 @@ def align_new_points(
         # we want all nans in missing info mask
         missing_info_mask = missing_info_mask | where_depth_nan_resized
         
-    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None or ldi_sky_mask is not None:
-        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None and ldi_sky_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask, ldi_sky_mask is provided, all must be provided."
+    if ldi_depth is not None or ldi_colors is not None or ldi_mask is not None:
+        assert ldi_depth is not None and ldi_colors is not None and ldi_mask is not None, "If one of ldi_depth, ldi_colors, ldi_mask is provided, all must be provided."
         ldi_depth = my_utils.opencv_resize(ldi_depth, height*upsampling_factor, width*upsampling_factor, mode="bilinear") 
         ldi_colors = my_utils.opencv_resize(ldi_colors, height*upsampling_factor, width*upsampling_factor, mode="bilinear")
         ldi_mask = my_utils.mask_resize(ldi_mask, height*upsampling_factor, width*upsampling_factor)
-        ldi_sky_mask = my_utils.mask_resize(ldi_sky_mask, height*upsampling_factor, width*upsampling_factor)
 
         where_ldi_depth_nan_resized = np.isnan(ldi_depth)
         if np.any(where_ldi_depth_nan_resized & (ldi_mask)):
@@ -316,7 +305,6 @@ def align_new_points(
         warped_depth_interp=warped_depth_interp,
         depth_estimated=depth_estimated,
         missing_info_mask=missing_info_mask,
-        sky_mask_inpainted=sky_mask_inpainted,
         pose=camera_pose,
         sphere_radius=sphere_radius,
         height=height*upsampling_factor,
@@ -329,7 +317,6 @@ def align_new_points(
         ldi_depth=ldi_depth,
         ldi_colors=ldi_colors, 
         ldi_mask=ldi_mask,
-        ldi_sky_mask=ldi_sky_mask,
     )
 
     res['pcd_naive'] = pcd_naive
@@ -337,7 +324,7 @@ def align_new_points(
 
     return res
 
-def split_new_points(pts, colors, sky_mask, pose1, pose2, forward):
+def split_new_points(pts, colors, pose1, pose2, forward):
     # (Antoine, 16 Oct) This function will pose problems if we want to do anything different than a straight line path.
     """
     Split points between points belonging to sphere1, sphere2, and neutral points.
@@ -351,10 +338,10 @@ def split_new_points(pts, colors, sky_mask, pose1, pose2, forward):
     where_sphere1 = is_point_in_camera_forward_space(pts, cam_loc_1, -forward)  # left of cam1
     where_sphere2 = is_point_in_camera_forward_space(pts, cam_loc_2, forward)   # right of cam2
     where_neutral = ~(where_sphere1 | where_sphere2)
-    pts1, colors1, sky_mask1 = pts[where_sphere1], colors[where_sphere1], sky_mask[where_sphere1]
-    pts2, colors2, sky_mask2 = pts[where_sphere2], colors[where_sphere2], sky_mask[where_sphere2]
-    pts_neutral, colors_neutral, sky_mask_neutral = pts[where_neutral], colors[where_neutral], sky_mask[where_neutral]
-    return (pts1, colors1, sky_mask1), (pts2, colors2, sky_mask2), (pts_neutral, colors_neutral, sky_mask_neutral)
+    pts1, colors1 = pts[where_sphere1], colors[where_sphere1]
+    pts2, colors2 = pts[where_sphere2], colors[where_sphere2]
+    pts_neutral, colors_neutral = pts[where_neutral], colors[where_neutral]
+    return (pts1, colors1), (pts2, colors2), (pts_neutral, colors_neutral)
 
 def is_point_in_camera_forward_space(point_positions,
                                     camera_position,
@@ -426,7 +413,6 @@ if __name__ == "__main__":
         all_pts_world = np.array([]).reshape(0, 3)
         all_colors_world = np.array([]).reshape(0, 3)
         all_ldi_mask_world = np.array([]).reshape(0, )
-        all_sky_mask_world = np.array([]).reshape(0, )
 
         for i in range(1, config.num_dreams):
             print(f"--- {_phase_current}: Harmonic Blending {i:02d} / {config.num_dreams-1} ---")
@@ -448,26 +434,23 @@ if __name__ == "__main__":
             warped_img_interp     = data['warped_img_interp']
             warped_depth_interp   = data['warped_depth_interp']
             pano_rgb_inpainted    = data['pano_rgb_inpainted']
-            sky_mask_inpainted    = data['sky_mask_inpainted']
             missing_info_mask     = data['missing_info_mask']
 
             if config.phase2.apply_ldi:
 
-                colors_bg, depth_bg, mask_bg, sky_mask_bg = my_utils.load_rgbd_ldi_pano(
+                colors_bg, depth_bg, mask_bg = my_utils.load_rgbd_ldi_pano(
                     dream=i,
                     save_dir_=save_dir_,
                     phase=_phase_2b,
                 )
-                ldi_colors =   colors_bg
-                ldi_depth  =   depth_bg
-                ldi_mask   =   mask_bg
-                ldi_sky_mask = sky_mask_bg
+                ldi_colors = colors_bg
+                ldi_depth  = depth_bg
+                ldi_mask   = mask_bg
             
             else:
-                ldi_colors   = None
-                ldi_depth = None
-                ldi_mask  = None
-                ldi_sky_mask = None
+                ldi_colors = None
+                ldi_depth  = None
+                ldi_mask   = None
 
             if config.phase2.ablate_hblending.apply:
                 align_fn = align_new_points_ABL_Hblend
@@ -482,7 +465,6 @@ if __name__ == "__main__":
                 warped_img_interp=warped_img_interp,
                 warped_depth_interp=warped_depth_interp,
                 pano_rgb_inpainted=pano_rgb_inpainted,
-                sky_mask_inpainted=sky_mask_inpainted,
                 depth_estimated=depth_estimated,
                 missing_info_mask=missing_info_mask,
                 camera_pose=pose_intermediate, 
@@ -494,12 +476,10 @@ if __name__ == "__main__":
                 ldi_depth=ldi_depth,
                 ldi_colors=ldi_colors,
                 ldi_mask=ldi_mask,
-                ldi_sky_mask=ldi_sky_mask,
                 **add_kwargs,
             )
             new_pts=res['pts_out']
             new_colors=res['colors_out']
-            new_sky_mask=res['sky_mask_out']
 
             if config.phase2.excessive_pcd_logging:
                 pointcloud_zoo['blended_naive_w_excess'] = res['pcd_naive']
@@ -511,10 +491,9 @@ if __name__ == "__main__":
 
             # (Optional) Remove outliers
             if config.phase2.outliers_removal.apply_on_fg:
-                new_pts, new_colors, new_sky_mask = my_utils.GeometryTransforms.remove_statistical_outliers(
+                new_pts, new_colors = my_utils.GeometryTransforms.remove_statistical_outliers(
                     new_pts,
                     new_colors,
-                    sky_mask=new_sky_mask,
                     **config.phase2.outliers_removal.options
                 )
                 if config.phase2.excessive_pcd_logging:
@@ -524,14 +503,13 @@ if __name__ == "__main__":
                     )
 
             # 10. Add new points to their corresponding spheres.
-            (new_pts1, new_colors1, new_sky_mask1), (new_pts2, new_colors2, new_sky_mask2), (new_pts_neutral, new_colors_neutral, new_sky_mask_neutral) = split_new_points(
-                new_pts, new_colors, new_sky_mask, pose1, pose2, translation_direction
+            (new_pts1, new_colors1), (new_pts2, new_colors2), (new_pts_neutral, new_colors_neutral) = split_new_points(
+                new_pts, new_colors, pose1, pose2, translation_direction
             )
             
             if config.phase2.apply_ldi:
                 new_pts_ldi=res['pts_out_ldi']
                 new_colors_ldi=res['colors_out_ldi']
-                new_sky_mask_ldi=res['sky_mask_out_ldi']
 
                 if config.phase2.excessive_pcd_logging:
                     pointcloud_zoo['blended_harmonic_ldi'] = my_utils.PointCloud(
@@ -541,10 +519,9 @@ if __name__ == "__main__":
 
                 # (Optional) Remove outliers for LDI points
                 if config.phase2.outliers_removal.apply_on_ldi:
-                    new_pts_ldi, new_colors_ldi, new_sky_mask_ldi = my_utils.GeometryTransforms.remove_statistical_outliers(
+                    new_pts_ldi, new_colors_ldi = my_utils.GeometryTransforms.remove_statistical_outliers(
                         new_pts_ldi,
                         new_colors_ldi,
-                        sky_mask=new_sky_mask_ldi,
                         **config.phase2.outliers_removal.options
                     )
 
@@ -554,10 +531,8 @@ if __name__ == "__main__":
                             colors=new_colors_ldi
                         )
 
-                    
-
-                (new_pts1_ldi, new_colors1_ldi, new_sky_mask1_ldi), (new_pts2_ldi, new_colors2_ldi, new_sky_mask2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi, new_sky_mask_neutral_ldi) = split_new_points(
-                    new_pts_ldi, new_colors_ldi, new_sky_mask_ldi, pose1, pose2, translation_direction
+                (new_pts1_ldi, new_colors1_ldi), (new_pts2_ldi, new_colors2_ldi), (new_pts_neutral_ldi, new_colors_neutral_ldi) = split_new_points(
+                    new_pts_ldi, new_colors_ldi, pose1, pose2, translation_direction
                 )
                 
                 new_mask1_zeros = np.zeros(new_pts1.shape[:-1])
@@ -569,27 +544,24 @@ if __name__ == "__main__":
                 new_mask_neutral_zeros = np.zeros(new_pts_neutral.shape[:-1])
                 new_mask_neutral_ones = np.ones(new_pts_neutral_ldi.shape[:-1])
 
-                new_pts1             = np.concatenate((new_pts1,               new_pts1_ldi), axis=0)
-                new_colors1          = np.concatenate((new_colors1,            new_colors1_ldi), axis=0)
-                new_mask_ldi1        = np.concatenate((new_mask1_zeros,        new_mask1_ones), axis=0) 
-                new_sky_mask1        = np.concatenate((new_sky_mask1,          new_sky_mask1_ldi), axis=0)
+                new_pts1           = np.concatenate((new_pts1,               new_pts1_ldi), axis=0)
+                new_colors1        = np.concatenate((new_colors1,            new_colors1_ldi), axis=0)
+                new_mask_ldi1      = np.concatenate((new_mask1_zeros,        new_mask1_ones), axis=0) 
     
-                new_pts2             = np.concatenate((new_pts2,               new_pts2_ldi), axis=0)
-                new_colors2          = np.concatenate((new_colors2,            new_colors2_ldi), axis=0)
-                new_mask_ldi2        = np.concatenate((new_mask2_zeros,        new_mask2_ones), axis=0)
-                new_sky_mask2        = np.concatenate((new_sky_mask2,          new_sky_mask2_ldi), axis=0)
+                new_pts2           = np.concatenate((new_pts2,               new_pts2_ldi), axis=0)
+                new_colors2        = np.concatenate((new_colors2,            new_colors2_ldi), axis=0)
+                new_mask_ldi2      = np.concatenate((new_mask2_zeros,        new_mask2_ones), axis=0)
                     
-                new_pts_neutral      = np.concatenate((new_pts_neutral,        new_pts_neutral_ldi), axis=0)
-                new_colors_neutral   = np.concatenate((new_colors_neutral,     new_colors_neutral_ldi), axis=0)
-                new_mask_neutral     = np.concatenate((new_mask_neutral_zeros, new_mask_neutral_ones), axis=0)
-                new_sky_mask_neutral = np.concatenate((new_sky_mask_neutral,   new_sky_mask_neutral_ldi), axis=0)
+                new_pts_neutral    = np.concatenate((new_pts_neutral,        new_pts_neutral_ldi), axis=0)
+                new_colors_neutral = np.concatenate((new_colors_neutral,     new_colors_neutral_ldi), axis=0)
+                new_mask_neutral   = np.concatenate((new_mask_neutral_zeros, new_mask_neutral_ones), axis=0)
             else:
                 new_mask_ldi1 = np.zeros(new_pts1.shape[:-1])
                 new_mask_ldi2 = np.zeros(new_pts2.shape[:-1])
                 new_mask_neutral = np.zeros(new_pts_neutral.shape[:-1])
 
-            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1, new_sky_mask1)
-            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2, new_sky_mask2)
+            sphere1.add_new_points(my_utils.world2cam_carte_3D(new_pts1, pose1), new_colors1, new_mask_ldi1)
+            sphere2.add_new_points(my_utils.world2cam_carte_3D(new_pts2, pose2), new_colors2, new_mask_ldi2)
 
             # Add all new points to world points, including inpainted+deformed points and points from the current dream.
             
@@ -604,7 +576,6 @@ if __name__ == "__main__":
                 all_pts_world = np.concatenate((all_pts_world, s1_ro.pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, s1_ro.colors), axis=0)
                 all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_ro.ldi_mask), axis=0)
-                all_sky_mask_world = np.concatenate((all_sky_mask_world, s1_ro.sky_mask), axis=0)
 
             else: # later iterations: sphere1 has both opened
                 s1_bo = sphere1.both_opened.get_world_pcd()
@@ -612,13 +583,11 @@ if __name__ == "__main__":
                 all_pts_world = np.concatenate((all_pts_world, s1_bo.pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, s1_bo.colors), axis=0)
                 all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s1_bo.ldi_mask), axis=0)
-                all_sky_mask_world = np.concatenate((all_sky_mask_world, s1_bo.sky_mask), axis=0)
 
             #10.b Neutral points
             all_pts_world = np.concatenate((all_pts_world, new_pts_neutral), axis=0)
             all_colors_world = np.concatenate((all_colors_world, new_colors_neutral), axis=0)
             all_ldi_mask_world = np.concatenate((all_ldi_mask_world, new_mask_neutral), axis=0)
-            all_sky_mask_world = np.concatenate((all_sky_mask_world, new_sky_mask_neutral), axis=0)
 
             #10.c Points from sphere2 (only last iter)
             if i == config.num_dreams - 1: 
@@ -627,7 +596,6 @@ if __name__ == "__main__":
                 all_pts_world = np.concatenate((all_pts_world, s2_lo.pts), axis=0)
                 all_colors_world = np.concatenate((all_colors_world, s2_lo.colors), axis=0)
                 all_ldi_mask_world = np.concatenate((all_ldi_mask_world, s2_lo.ldi_mask), axis=0)
-                all_sky_mask_world = np.concatenate((all_sky_mask_world, s2_lo.sky_mask), axis=0)
 
                 assert np.allclose(pose2, pose_end), "Error in final camera pose computation"
 
@@ -642,7 +610,6 @@ if __name__ == "__main__":
                     pts=all_pts_world,
                     colors=all_colors_world,
                     ldi_mask=all_ldi_mask_world,
-                    sky_mask=all_sky_mask_world,
                 ), f)
 
         printc(f"PHASE {_phase_current} SUCCESSFULLY COMPLETED!", color='green')

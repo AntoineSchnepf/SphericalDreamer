@@ -107,14 +107,12 @@ if __name__ == "__main__":
         pts = PointCloud_instance.pts
         colors = PointCloud_instance.colors
         ldi_mask = PointCloud_instance.ldi_mask
-        sky_mask = PointCloud_instance.sky_mask
 
         # remove points at both ends for now
-        pts_corrected, colors_corrected, ldi_mask_corrected, sky_mask_corrected = my_utils.run_corrective_pipeline_on_world(
+        pts_corrected, colors_corrected, ldi_mask_corrected = my_utils.run_corrective_pipeline_on_world(
             pts=pts,
             colors=colors,
             ldi_mask=ldi_mask,
-            sky_mask=sky_mask,
             pose_left=pose_left,
             pose_right=pose_right,
             translation_direction=translation_direction,
@@ -123,70 +121,10 @@ if __name__ == "__main__":
             **config.phase3.world_correction.options
         )
 
-        PointCloud_instance = my_utils.PointCloud(pts_corrected, colors_corrected, ldi_mask_corrected, sky_mask_corrected)
+        PointCloud_instance = my_utils.PointCloud(pts_corrected, colors_corrected, ldi_mask_corrected)
         printc(f"--- {_phase_current}: Corrected world geometry in {time.time() - t0:.2f} seconds.", color='yellow')
     
-    # 3. Replace sky points if specified
-    if config.phase3.replace_sky.apply:
-        t0 = time.time()
-
-        source_sky_img = Image.open(config.phase3.replace_sky.source_sky_img).convert("RGB")
-        pts = PointCloud_instance.pts
-        colors = PointCloud_instance.colors
-        ldi_mask = PointCloud_instance.ldi_mask
-        sky_mask = PointCloud_instance.sky_mask
-
-        pts_no_sky = pts[~sky_mask]
-        colors_no_sky = colors[~sky_mask]
-        ldi_mask_no_sky = ldi_mask[~sky_mask]
-        sky_mask_no_sky = sky_mask[~sky_mask]
-
-        num_dreams = config.num_dreams
-        x_init = 0.0
-        x_end = (num_dreams - 1) * config.delta_walk
-        x_mid = (x_end + x_init) / 2.0
-
-        x_min, x_max, _, _ = bounding_box_xy(pts_no_sky)
-        sky_dist = max(
-            abs(x_max - x_mid),
-            abs(x_min - x_mid),
-        )
-
-        pose_mid = np.array([
-                [1, 0, 0, x_mid],
-                [0, 1, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1]
-            ], dtype=np.float32)
-
-        pts_sky = my_utils.depth2world(
-            depth=np.ones((height*config.pcd_upsampling_factor, width*config.pcd_upsampling_factor), dtype=np.float32)*sky_dist*config.phase3.replace_sky.sky_dist_factor,
-            pose=pose_mid,
-            sphere_radius=config.sphere_radius,
-            height=height*config.pcd_upsampling_factor,
-            width=width*config.pcd_upsampling_factor,
-        ).reshape(-1, 3)
-
-        
-        colors_sky = my_utils.opencv_resize(
-            my_utils.PIL_to_numpy(source_sky_img),
-            height*config.pcd_upsampling_factor,
-            width*config.pcd_upsampling_factor
-        ).reshape(-1, 3) 
-
-        ldi_mask_sky = np.zeros((pts_sky.shape[0],), dtype=bool)
-        sky_mask_sky = np.ones((pts_sky.shape[0],), dtype=bool)
-
-        pts_final = np.concatenate([pts_no_sky, pts_sky], axis=0)
-        colors_final = np.concatenate([colors_no_sky, colors_sky], axis=0)
-        ldi_mask_final = np.concatenate([ldi_mask_no_sky, ldi_mask_sky], axis=0)
-        sky_mask_final = np.concatenate([sky_mask_no_sky, sky_mask_sky], axis=0)
-
-        PointCloud_instance = my_utils.PointCloud(pts_final, colors_final, ldi_mask_final, sky_mask_final)
-
-        printc(f"--- {_phase_current}: Replaced sky points in {time.time() - t0:.2f} seconds.", color='yellow')
-
-    # 4. Save corrected point cloud
+    # 3. Save corrected point cloud
     t0 = time.time()
     with open(save_dir_ /f"{_phase_3}_final_dream_pcd_unfiltered.pkl", "wb") as f:
         pickle.dump(PointCloud_instance, f)
@@ -210,17 +148,16 @@ if __name__ == "__main__":
     if config.phase3.pointcloud_downsampling.mode != "deactivated":
         if config.phase3.pointcloud_downsampling.mode == "skip":
             t0 = time.time()
-            pts, colors, ldi_mask, sky_mask = PointCloud_instance.pts, PointCloud_instance.colors, PointCloud_instance.ldi_mask, PointCloud_instance.sky_mask
+            pts, colors, ldi_mask = PointCloud_instance.pts, PointCloud_instance.colors, PointCloud_instance.ldi_mask
             stride = config.phase3.pointcloud_downsampling.skip_options.stride
             pts = pts[::stride]
             colors = colors[::stride]
             ldi_mask = ldi_mask[::stride]
-            sky_mask = sky_mask[::stride]
-            PointCloud_instance = PointCloud(pts=pts, colors=colors, ldi_mask=ldi_mask, sky_mask=sky_mask)
+            PointCloud_instance = PointCloud(pts=pts, colors=colors, ldi_mask=ldi_mask)
             printc(f"--- {_phase_current}: Downsampled point cloud from {n_pts_before} to {len(PointCloud_instance.pts)} points in {time.time() - t0:.2f} seconds using skip.", color='yellow')
 
         elif config.phase3.pointcloud_downsampling.mode == "voxel":
-            raise NotImplementedError("Voxel downsampling with ldi_mask and sky_mask was depreciated for sky mask compatiblity reasons (10/01/2025).")
+            raise NotImplementedError("Voxel downsampling with ldi_mask was depreciated (10/01/2025).")
             t0 = time.time()
             pcd = PointCloud_instance.get_o3d_pointcloud()
             voxel_size = config.phase3.pointcloud_downsampling.voxel_options.voxel_size
@@ -235,12 +172,11 @@ if __name__ == "__main__":
                 printc(f"--- {_phase_current}: Auto downsampling skipped as point cloud has {n_pts_before} points which is less than target {n_target} points.", color='yellow')
             else:
                 stride = int(np.ceil(1 / ratio))
-                pts, colors, ldi_mask, sky_mask = PointCloud_instance.pts, PointCloud_instance.colors, PointCloud_instance.ldi_mask, PointCloud_instance.sky_mask
+                pts, colors, ldi_mask = PointCloud_instance.pts, PointCloud_instance.colors, PointCloud_instance.ldi_mask
                 pts = pts[::stride]
                 colors = colors[::stride]
                 ldi_mask = ldi_mask[::stride]
-                sky_mask = sky_mask[::stride]
-                PointCloud_instance = PointCloud(pts=pts, colors=colors, ldi_mask=ldi_mask, sky_mask=sky_mask)
+                PointCloud_instance = PointCloud(pts=pts, colors=colors, ldi_mask=ldi_mask)
                 printc(f"--- {_phase_current}: Downsampled point cloud from {n_pts_before} to {len(PointCloud_instance.pts)} points in {time.time() - t0:.2f} seconds using skipping (stride={stride}).", color='yellow')
         
         else: 
@@ -259,12 +195,10 @@ if __name__ == "__main__":
         pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=config.phase3.remove_outliers.options.nb_neighbors, 
                                                                 std_ratio=config.phase3.remove_outliers.options.std_ratio) 
         ldi_mask = PointCloud_instance.ldi_mask[ind]
-        sky_mask = PointCloud_instance.sky_mask[ind]
         PointCloud_instance = my_utils.PointCloud(
             pts=np.asarray(pcd.points),
             colors=np.asarray(pcd.colors),
             ldi_mask=ldi_mask,
-            sky_mask=sky_mask
         )
         printc(f"--- {_phase_current}: Removed {n_before - len(PointCloud_instance.pts)} outliers in {time.time() - t0:.2f} seconds.", color='yellow')
 

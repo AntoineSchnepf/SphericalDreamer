@@ -123,7 +123,6 @@ def harmonic_blend_of_depths_ldi(
         warped_depth_interp, 
         depth_estimated, 
         missing_info_mask, 
-        sky_mask_inpainted,
         pose, 
         sphere_radius, 
         height, 
@@ -136,7 +135,6 @@ def harmonic_blend_of_depths_ldi(
         ldi_depth=None,
         ldi_colors=None, 
         ldi_mask=None,
-        ldi_sky_mask=None,
     ):
     """ Inputs are in HxW format except colors which is HxWx3 
     Given the two depth map (interpolated and estimated), it merges with the following constraints:
@@ -186,7 +184,7 @@ def harmonic_blend_of_depths_ldi(
     whether_ldi = (ldi_depth is not None)
     # optional: add ldi points to the deformation pipilines
     if whether_ldi:
-        assert ldi_colors is not None and ldi_mask is not None and ldi_sky_mask is not None, "If ldi_depth is provided, ldi_colors, ldi_mask, and ldi_sky_mask must also be provided"
+        assert ldi_colors is not None and ldi_mask is not None, "If ldi_depth is provided, ldi_colors and ldi_mask must also be provided"
         mask_deform_ldi = (mask_boundary | mask_deform) & ldi_mask # only consider points that are in the deformable region and in ldi mask
 
         all_pts_deform_ldi = my_utils.depth2world(
@@ -229,10 +227,6 @@ def harmonic_blend_of_depths_ldi(
     colors_out_boundary = colors[mask_boundary]
     colors_out = np.concatenate((colors_out_exb, colors_out_boundary), axis=0)
 
-    sky_mask_out_exb = sky_mask_inpainted[mask_deform]
-    sky_mask_out_boundary = sky_mask_inpainted[mask_boundary]
-    sky_mask_out = np.concatenate((sky_mask_out_exb, sky_mask_out_boundary), axis=0)
-
     # Visualization & pointcloud
     pts_3D_carte_new = np.zeros((height, width, 3), dtype=np.float32)
     pts_3D_carte_new[mask_keep] = pts_keep
@@ -242,7 +236,6 @@ def harmonic_blend_of_depths_ldi(
     pcd_harmonic = my_utils.PointCloud(
         pts=pts_3D_carte_new,
         colors=colors,
-        sky_mask=sky_mask_inpainted
     )
     if logging:
         _log_masks(mask_keep, mask_deform, mask_boundary)
@@ -261,7 +254,6 @@ def harmonic_blend_of_depths_ldi(
     res = {
         "pts_out": pts_out,
         "colors_out": colors_out,
-        "sky_mask_out": sky_mask_out,
         "pcd_harmonic": pcd_harmonic,
         "blended_depth_harmonic": blended_depth_harmonic
     }
@@ -270,11 +262,9 @@ def harmonic_blend_of_depths_ldi(
         # extract the deformed ldi points
         pts_out_ldi = undid_cat[2]
         colors_out_ldi = ldi_colors[mask_deform_ldi]
-        sky_mask_out_ldi = ldi_sky_mask[mask_deform_ldi]
 
         res["pts_out_ldi"] = pts_out_ldi
         res["colors_out_ldi"] = colors_out_ldi
-        res["sky_mask_out_ldi"] = sky_mask_out_ldi
 
     return res
 
