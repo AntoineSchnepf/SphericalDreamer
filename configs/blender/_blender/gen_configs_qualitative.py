@@ -164,12 +164,12 @@ for scene_type in ["wonderjourney", "scenescape", "sphericaldreamer"]:
 
         cfg = yaml_load(CONFIG_IN)
 
-        cfg['phase5v2']['custom_trajectory']['positions'] = UPDATES['positions']
+        cfg['phase5']['custom_trajectory']['positions'] = UPDATES['positions']
         cfg['expname'] = UPDATES['expname']
-        cfg['phase5v2']['custom_world']['scene_type'] = UPDATES['scene_type']
-        cfg['phase5v2']['custom_world']['world_path'] = UPDATES['world_path']
-        cfg['phase5v2']['render_settings']['keep_ratio'] = UPDATES['keep_ratio']
-        cfg['phase5v2']['render_settings']['point_size'] = 0.0022 *  15 if scene_type == 'wonderjourney' else 0.0022 
+        cfg['phase5']['custom_world']['scene_type'] = UPDATES['scene_type']
+        cfg['phase5']['custom_world']['world_path'] = UPDATES['world_path']
+        cfg['phase5']['render_settings']['keep_ratio'] = UPDATES['keep_ratio']
+        cfg['phase5']['render_settings']['point_size'] = 0.0022 *  15 if scene_type == 'wonderjourney' else 0.0022 
         cfg['save_dir'] = f"OUTPUTS/X_ICML_RENDERS/qualitative"
 
         save_config(cfg, cfg_name=f"{expname}.yaml", save_dir=CFG_DIR)

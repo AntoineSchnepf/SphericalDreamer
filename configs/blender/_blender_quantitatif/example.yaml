@@ -3,7 +3,7 @@
 
 expname: example
 num_dreams: 0
-phase5v2:
+phase5:
   render_settings:
     min_near_plane: 0.001
     keep_ratio: 1.0

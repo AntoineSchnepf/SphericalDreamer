@@ -9,7 +9,7 @@ configs=(
 # Run experiments
 for config in "${configs[@]}"; do
     echo "🚀 Running blender renders with config: $config"
-    blender --background --python 5v2_render_blender.py -- --config $config
+    blender --background --python 5_render_blender.py -- --config $config
 
     if [ $? -ne 0 ]; then
         echo "❌ Experiment with config $config failed."

@@ -34,7 +34,4 @@ python3 4_render_video.py --config $config_name
 
 # # 5. Render blender
 # echo Running 5_render_blender.py...
-# blender --background --python 5v2_render_blender.py -- --config $config_name
-
-# echo Running 6_train_splatfacto.py...
-# python3 6_train_splatfacto.py --config $config_name
+# blender --background --python 5_render_blender.py -- --config $config_name

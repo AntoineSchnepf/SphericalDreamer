@@ -16,4 +16,4 @@ prompt: A large-scale 3D subterranean cave environment inspired by the Phantom o
   atmospheric lighting as if from distant unseen lanterns creating soft warm reflections,
   deep shadows fading into darkness, cinematic gothic mood, immersive enclosed underground
   atmosphere with realistic rock and water textures and strong spatial depth.
-save_dir: OUTPUTS/SphericalDreamerRecurse/_expC/
+save_dir: OUTPUTS/SphericalDreamer/_expC/

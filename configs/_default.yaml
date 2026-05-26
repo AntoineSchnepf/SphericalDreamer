@@ -187,36 +187,7 @@ phase4: # render video
       fpd_e: 1
       fpd_a: 1
 
-phase5: # render nfs dataset
-  visualize_removed_points: False
-  fix_world: True
-  point_size: 3.0
-  bg_color: [0, 0, 0, 1]
-  width: 512
-  height: 512
-  remove_outliers:
-    apply: True
-    nb_neighbors: 20
-    std_ratio: 5.0
-  world:
-    correct_depth: False
-    near: 0.1
-    far: 1.0
-    correct_walls: False
-    correct_floor: True
-    depth_threshold_for_floor_correction: 1.0
-    remove_outliers: False
-  render_settings:
-    nb_points: 500
-    nb_samples_per_point: 10
-    ranges: 
-      min_x: 0.0
-      min_y: -0.2
-      max_y: 0.2
-      min_z: -0.1
-      max_z: 0.3
-
-phase5v2:
+phase5:
   render_settings:
     render_engine: CYCLES
     use_gpu_series: True   
@@ -240,21 +211,10 @@ phase5v2:
       min_distance: 0.02
       max_distance: 5.0
     max_render_distance: null
-  nfs_dataset:
-    bg_color: [0, 0, 0, 1]
-    fov_deg: 60.0
-    nb_points: 250
-    nb_samples_per_point: 6
-    ranges:
-      min_x: 0.0
-      min_y: -0.2
-      max_y: 0.2
-      min_z: -0.1
-      max_z: 0.3
   custom_trajectory: # Render custom cameras
-    enable: false
-    positions: [] # List of [x, y, z, elev, azim]
-    render_eqr_too: false  # Also render equirectangular images at each position
+    enable: true
+    positions: [[0, 0, 0, 0, 0]] # List of [x, y, z, elev, azim]
+    render_eqr_too: true  # Also render equirectangular images at each position
     eqr_resolution:  # Resolution for equirectangular renders
       width: 2048
       height: 1024
@@ -264,10 +224,6 @@ phase5v2:
     world_path: null
     scale_factor: 1.0  # Scale the world by this factor
 
-phase6: # train splatfacto
-  near_plane: 0.08
-  far_plane: 86.0
-  background_color: black
 
 
 # tuned args
@@ -279,5 +235,5 @@ seed: 119224
 seed_offsets: [0, 9, 20, 33, 45]
 
 # logging
-save_dir: OUTPUTS/SphericalDreamerRecurse
+save_dir: OUTPUTS/SphericalDreamer
 

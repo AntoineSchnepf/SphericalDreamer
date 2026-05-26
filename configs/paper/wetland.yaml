@@ -9,4 +9,4 @@ load_phase2c_from: null
 load_phase3_from: null #TODO: implemtement this
 
 
-save_dir: OUTPUTS/SphericalDreamerRecurse/_exp1
+save_dir: OUTPUTS/SphericalDreamer/_exp1
