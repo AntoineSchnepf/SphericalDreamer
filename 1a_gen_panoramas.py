@@ -1,45 +1,25 @@
 import os
-import warnings
-import logging
 import contextlib
 from io import StringIO
-
-# Disabling some warnings
-os.environ["GLOG_minloglevel"] = "2"
-os.environ["GLOG_logtostderr"] = "0"
-os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
-logging.disable(logging.CRITICAL + 1)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.simplefilter("ignore", FutureWarning)
+import pipeline.bootstrap  # noqa: F401 - sets GLOG env vars and filters warnings
 
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 
 # local imports
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
-sys.path.append(_360monodepth_install_dir) 
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
 import my_utils
 from my_utils import printc
 
-_phase_1a = "1a"
-_phase_1b = "1b"
-_phase_2a = "2a"
-_phase_2b = "2b"
-_phase_2c = "2c"
+from pipeline.phases import PHASE_1A
 
-_phase_current = _phase_1a
+_phase_current = PHASE_1A
 
 
 if __name__ == "__main__":
-    # TODO karim: add override functionality and save config
-    config = my_utils.fetch_config_via_parser(
-        debug=False, 
-        debug_parser_override=["--config", "F0_forest.yaml"]
-    )
+    config = my_utils.fetch_config_via_parser(debug=False)
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
     # ----------------------------------------------------------------- #

@@ -1,6 +1,0 @@
-dense_rainforest_understory.yaml
-coral_reef_canyon.yaml
-martian_badlands_2.yaml
-phantom_opera_cave_river.yaml
-sound_of_music_grass_field.yaml
-upside_down_stranger_things.yaml

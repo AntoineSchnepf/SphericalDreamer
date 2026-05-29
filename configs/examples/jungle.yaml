@@ -1,0 +1,8 @@
+expname: jungle
+num_dreams: 3
+prompt: A dense rainforest understory extending forward and behind the observer, thick
+  overlapping vegetation with no sharp edges, large leaves in deep green tones, moist
+  ground covered in roots and organic debris, overcast sky filtering light through
+  the canopy, soft diffused illumination, humid and lush atmosphere, immersive tropical
+  environment.
+save_dir: OUTPUTS/SphericalDreamer

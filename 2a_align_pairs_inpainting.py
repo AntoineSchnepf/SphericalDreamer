@@ -1,51 +1,30 @@
 import os
-import warnings
-import logging
 import contextlib
 from io import StringIO
-
-# Disabling some warnings
-os.environ["GLOG_minloglevel"] = "2"
-os.environ["GLOG_logtostderr"] = "0"
-os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
-logging.disable(logging.CRITICAL + 1)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.simplefilter("ignore", FutureWarning)
-
+import pipeline.bootstrap  # noqa: F401 - sets GLOG env vars and filters warnings
 
 import sys
 import numpy as np
-from PIL import Image, ImageOps
-import copy
+from PIL import Image
 from functools import partial
-from skimage.segmentation import find_boundaries
 from scipy.ndimage import maximum_filter, minimum_filter
 from scipy import ndimage as ndi
-import matplotlib.pyplot as plt
 import time
 import pickle as pkl
-from prodict import Prodict
-import pyfiglet
-import argparse
 from pathlib import Path
-# local imports
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
-sys.path.append(_360monodepth_install_dir) 
 
+# local imports
 import my_utils
 from my_utils import printc
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
-    from utils.depth_alignment import Pano_depth_estimation
-from render_pcd import render_v2, render_v1, render_v0
+from render_pcd import render_v0
 
-_phase_1a = "1a"
-_phase_1b = "1b"
-_phase_2a = "2a"
-_phase_2b = "2b"
-_phase_2c = "2c"
+from pipeline.phases import PHASE_1A, PHASE_1B, PHASE_2A
 
-_phase_current = _phase_2a
+_phase_1a = PHASE_1A
+_phase_1b = PHASE_1B
+_phase_current = PHASE_2A
 
 
 def largest_connected_component(mask: np.ndarray, connectivity: int = 2) -> np.ndarray:
@@ -106,14 +85,10 @@ def render_and_inpaint_from_pose(
     res = {}
 
     # 4. Render points from sphere2 (opened right) + sphere2 (opened left), from the intermediate camera
-    if rendering_version==0:
+    if rendering_version == 0:
         render_fn = render_v0
-    elif rendering_version==1:
-        raise NotImplementedError("Rendering version 1 is deprecated since 17/12/2025 for ldi mask rendering. Please use version 0.")
-        render_fn = render_v1
-    elif rendering_version==2:
-        raise NotImplementedError("Rendering version 2 is deprecated since 17/12/2025 for ldi mask rendering. Please use version 0.")
-        render_fn = render_v2
+    elif rendering_version in (1, 2):
+        raise NotImplementedError(f"Rendering version {rendering_version} is deprecated since 17/12/2025 for ldi mask rendering. Please use version 0.")
     else:
         raise ValueError(f"rendering_version {rendering_version} not recognized!")
     t0 = time.time()
@@ -136,8 +111,8 @@ def render_and_inpaint_from_pose(
     missing_info_mask, missing_info_masks_tile = get_missing_info_mask(masking_operations, missing_info_mask) 
     where_depth_nan = np.isnan(warped_depth_interp)
     missing_info_mask = missing_info_mask | where_depth_nan
-    inpainting_mask = missing_info_mask # TODO: (Antoine, 14 oct) The inpainting mask is currently composed of both <<large missing regions due to limited covering of the main spheres>> and <<small holes due to occlusions>>. We could separate these two cases and do something neater?.
-
+    inpainting_mask = missing_info_mask 
+    
     if np.any(where_depth_nan & (~missing_info_mask)):
         print("IMPORTANT WARNING: depth has NaNs in non-missing info regions!")
     
@@ -295,54 +270,13 @@ def get_sphere(dream, save_dir_, config, height, width):
 
     return sphere
 
-def get_mask_filter_points_with_pose(points_w, pose, direction, x_thresh):
-    """
-    Filters out world points that satisfy (in camera frame):
-        x_cam > x_thresh AND z_cam < 0
-
-    Args:
-        points_w: (N, 3) array of points in WORLD coordinates
-        pose: (4, 4) camera pose matrix where
-              pose[:3, :3] = R_wc (camera orientation in world)
-              pose[:3, 3]  = C_w  (camera position in world)
-        direction: 'left' or 'right'. Whether to remove points for x > x_thresh (right) or x < -x_thresh (left)
-        x_thresh: threshold t expressed in CAMERA coordinates
-
-    Returns:
-        Filtered points in WORLD coordinates
-    """
-    points_w = np.asarray(points_w, dtype=float)
-
-    R_wc = pose[:3, :3]
-    C_w  = pose[:3, 3]
-
-    # World → camera transformation
-    # p_c = R_wc^T (p_w - C_w)
-    points_c = (R_wc.T @ (points_w - C_w).T).T
-
-    x_cam = points_c[:, 0]
-    z_cam = points_c[:, 2]
-
-    # Remove points that satisfy the condition
-    if direction == 'left':
-        keep_mask = ~((x_cam < -x_thresh) & (z_cam < 0))
-    elif direction == 'right':
-        keep_mask = ~((x_cam > x_thresh) & (z_cam < 0))
-    else:
-        raise ValueError(f"Unknown direction: {direction}. Use 'left' or 'right'.")
-    
-    return keep_mask
-
 # this scripts:
 # - creates high resolution sphere with optional LDI points and saves them in the cache for the final pcd
 # - aligns pairs of spheres with inpainting at intermediate views
 # - saves inpaintings and their estimated depth in the cache for phase 2.B and 2.C
     
 if __name__ == "__main__":
-    config = my_utils.fetch_config_via_parser(
-        debug=False, 
-        debug_parser_override=["--config", "Antoine/F0_forest.yaml"]
-    )
+    config = my_utils.fetch_config_via_parser(debug=False)
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
     spherical_dreamer = SphericalDreamer(

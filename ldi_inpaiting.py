@@ -2931,4 +2931,291 @@ if __name__ == "__main__":
         )
 
 
-# TODO: (Antoine, 8 decembre) Anytime the depth is resized, we need to check how it is done, as it could cause "trails" artefacts in the 3D world is bilinear is used
+# ---------------------------------------------------------------------------
+# High-level LDI phase runner (shared by 1b_ldi.py and 2b_ldi.py)
+# ---------------------------------------------------------------------------
+
+def run_ldi_phase(
+    config,
+    save_dir_,
+    spherical_dreamer,
+    *,
+    phase_tag,
+    phase_cfg,
+    load_phase_from,
+    dream_indices,
+    load_data_fn,
+    save_path_fn,
+    viz_filename,
+):
+    """
+    Shared LDI inpainting body used by phases 1b and 2b.
+
+    Parameters
+    ----------
+    config : Prodict
+        Full pipeline config.
+    save_dir_ : Path
+        Per-experiment output directory.
+    spherical_dreamer : SphericalDreamer
+        Loaded model wrapper.
+    phase_tag : str
+        Short phase identifier (e.g. "1b" or "2b") for logging.
+    phase_cfg : Prodict
+        Phase-specific config slice (config.phase1 or config.phase2).
+    load_phase_from : str or None
+        Value of config.load_phase1b_from / config.load_phase2b_from.
+    dream_indices : iterable of int
+        Dream indices to process (range(0, N) for 1b, range(1, N) for 2b).
+    load_data_fn : callable (int) -> (np.ndarray, np.ndarray)
+        Loads (img, depth) for a given dream index.
+    save_path_fn : callable (int) -> Path
+        Returns the per-dream visualization directory for dream index i.
+    viz_filename : str
+        Filename for the depth-inpainting visualization PNG.
+    """
+    import os
+    import torch
+    import time
+
+    plot_results = config.ldi.save_plots
+
+    my_utils.printc(f"=== [PHASE {phase_tag}] EXPERIMENT: {config.expname} ===", color='cyan')
+
+    if phase_cfg.apply_ldi:
+        if not load_phase_from:
+            my_utils.printc(f"=== PHASE {phase_tag}: LDI INPAINTING ===", color='green')
+
+            # -------------------------------------------------
+            # 0. LOAD INPUT IMAGES + DEPTH
+            # -------------------------------------------------
+            list_img = []
+            list_depth_origin = []
+            for i in dream_indices:
+                my_utils.printc(f"--- {phase_tag}: load image  {i:02d} / {config.num_dreams} ---", color='yellow')
+                img, depth_origin = load_data_fn(i)
+                list_img.append(img)
+                list_depth_origin.append(depth_origin)
+
+            # -------------------------------------------------
+            # 1. COMPUTE MASK FOR FOREGROUND OBJECTS
+            # -------------------------------------------------
+            t0 = time.time()
+            list_mask = []
+            sam, mask_generator = instanciate_sam(config)
+
+            for list_idx, i in enumerate(dream_indices):
+                my_utils.printc(f"--- {phase_tag}: Compute mask for foreground object  {i:02d} / {config.num_dreams} ---", color='yellow')
+                save_viz_path = save_path_fn(i)
+                os.makedirs(save_viz_path, exist_ok=True)
+                mask = get_foreground_segmask(
+                    config,
+                    mask_generator,
+                    list_img[list_idx],
+                    list_depth_origin[list_idx],
+                    plot_results=plot_results,
+                    save_path=save_viz_path,
+                )
+                list_mask.append(mask)
+
+            del sam
+            del mask_generator
+            torch.cuda.empty_cache()
+            print(f"Foreground mask computed in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
+
+            # -------------------------------------------------
+            # 2. INPAINTING WITH LAMA
+            # -------------------------------------------------
+            t0 = time.time()
+            list_prompt = []
+            list_mask_smooth_pil = []
+            list_inpaint_pano_lama_pil = []
+            list_viz_kwargs = []
+            llm_model, processor = instanciate_llm_and_processor()
+
+            for list_idx, i in enumerate(dream_indices):
+                my_utils.printc(f"--- {phase_tag}: Lama Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+                prompt, mask_smooth_pil, inpaint_pano_lama_pil, viz_kwargs = lama_flux_double_inpainting_p1(
+                    config,
+                    spherical_dreamer,
+                    llm_model,
+                    processor,
+                    image=list_img[list_idx],
+                    mask=list_mask[list_idx],
+                )
+                list_prompt.append(prompt)
+                list_mask_smooth_pil.append(mask_smooth_pil)
+                list_inpaint_pano_lama_pil.append(inpaint_pano_lama_pil)
+                list_viz_kwargs.append(viz_kwargs)
+
+            spherical_dreamer._release_lama_memory()
+            del llm_model
+            del processor
+            torch.cuda.empty_cache()
+            print(f"Lama inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
+
+            # -------------------------------------------------
+            # 3. INPAINTING WITH FLUX
+            # -------------------------------------------------
+            t0 = time.time()
+            list_inpaint_mask_pil = []
+            list_inpaint_pano_pil = []
+
+            for list_idx, i in enumerate(dream_indices):
+                my_utils.printc(f"--- {phase_tag}: Flux Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+                inpaint_pano_pil, inpaint_mask_pil = lama_flux_double_inpainting_p2(
+                    config,
+                    spherical_dreamer,
+                    list_prompt[list_idx],
+                    list_mask_smooth_pil[list_idx],
+                    list_inpaint_pano_lama_pil[list_idx],
+                    list_viz_kwargs[list_idx],
+                    plot_results=plot_results,
+                    save_path=save_path_fn(i),
+                )
+                list_inpaint_mask_pil.append(inpaint_mask_pil)
+                list_inpaint_pano_pil.append(inpaint_pano_pil)
+
+            spherical_dreamer._release_flux_inpainting_memory()
+            torch.cuda.empty_cache()
+            print(f"FLUX inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images.")
+
+            # -------------------------------------------------
+            # 4. DEPTH INPAINTING (at resolution 1024 * 2048)
+            # -------------------------------------------------
+            t0 = time.time()
+            list_depth_inpainted = []
+            list_mask_inpaint_resized = []
+            list_depth_origin_resized = []
+            list_img_pil_resized = []
+
+            if config.ldi.depth_inpainting.method == "infusion":
+                pipe_dp = instanciate_pipe_dp()
+
+            for list_idx, i in enumerate(dream_indices):
+                my_utils.printc(f"--- {phase_tag}: Depth Inpainting  {i:02d} / {config.num_dreams} ---", color='yellow')
+
+                img_pil, depth_origin, _, inpaint_mask_bool_ = prepare_inpainting(
+                    config,
+                    list_img[list_idx],
+                    list_depth_origin[list_idx],
+                    list_inpaint_mask_pil[list_idx],
+                )
+
+                if config.ldi.depth_inpainting.method == "horizontal_min_prior":
+                    _, depth_prior = remove_low_freq(depth_origin, config=config.ldi.masking.depth_mean_based.remove_depth_low_freq)
+                    inpaint_mask_bool_ = np.ones_like(inpaint_mask_bool_, dtype=bool)
+                    _ = my_utils.numpy_bool_to_pil_mask(inpaint_mask_bool_)
+                    depth_inpainted = depth_prior
+
+                elif config.ldi.depth_inpainting.method == "harmonic_blending":
+                    depth_360_mono = spherical_dreamer.estimate_pano_depth(inpaint_pano_pil)
+                    inpaint_pano = np.array(inpaint_pano_pil) / 255.0
+                    _, _, _, depth_inpainted_hblending = harmonic_blend_of_depths(
+                        colors=inpaint_pano,
+                        warped_depth_interp=depth_origin,
+                        depth_estimated=depth_360_mono,
+                        missing_info_mask=inpaint_mask_bool_,
+                        pose=np.eye(4).astype(np.float32),
+                        sphere_radius=1.0,
+                        height=inpaint_pano.shape[0],
+                        width=inpaint_pano.shape[1],
+                        phase=phase_tag,
+                        logging=plot_results,
+                        where_save=save_viz_path,
+                    )
+
+                elif config.ldi.depth_inpainting.method == "infusion":
+                    depth_inpainted = inpaint_bg_depth_infusion(
+                        image=img_pil,
+                        depth=depth_origin,
+                        image_bg=list_inpaint_pano_pil[list_idx],
+                        bg_mask=inpaint_mask_pil,
+                        pipe_dp=pipe_dp,
+                        rescale_to_min_depth=True,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
+                        plot_results=plot_results,
+                        save_path=save_viz_path,
+                    )
+
+                elif config.ldi.depth_inpainting.method == "nearest":
+                    depth_inpainted = interpolate_depth_nearest(
+                        depth=depth_origin,
+                        bg_mask=inpaint_mask_bool_,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
+                    )
+
+                elif config.ldi.depth_inpainting.method == "bilinear_plus_nn":
+                    depth_inpainted = interpolate_depth_bilinear_plus_nn(
+                        depth=depth_origin,
+                        bg_mask=inpaint_mask_bool_,
+                        pad_width=config.ldi.depth_inpainting.pad_width,
+                    )
+
+                else:
+                    raise ValueError(f"Unknown depth inpainting method: {config.ldi.depth_inpainting.method}")
+
+                depth_inpainted[~inpaint_mask_bool_] = np.nan
+                if config.ldi.depth_inpainting.apply_post_processing:
+                    depth_inpainted = post_process_inpainted_depth(
+                        depth_bg=depth_inpainted,
+                        depth_fg=depth_origin,
+                        bg_mask=inpaint_mask_bool_,
+                        plot=plot_results,
+                        save_path=save_path_fn(i),
+                    )
+
+                list_depth_inpainted.append(depth_inpainted)
+                list_mask_inpaint_resized.append(inpaint_mask_bool_)
+                list_depth_origin_resized.append(depth_origin)
+                list_img_pil_resized.append(img_pil)
+
+            if config.ldi.depth_inpainting.method == "infusion":
+                del pipe_dp
+            torch.cuda.empty_cache()
+            print(f"Depth inpainting done in {time.time() - t0:.1f} seconds for {config.num_dreams} images with method {config.ldi.depth_inpainting.method}.")
+
+            # -------------------------------------------------
+            # SAVE RESULTS
+            # -------------------------------------------------
+            _method_to_suffix = {
+                "horizontal_min_prior": "hminprior",
+                "harmonic_blending":    "hblending",
+                "infusion":             "infusion",
+                "nearest":              "nn",
+                "bilinear_plus_nn":     "bilinear_nn",
+            }
+            suffix = _method_to_suffix[config.ldi.depth_inpainting.method]
+            for list_idx, i in enumerate(dream_indices):
+                kwargs = {
+                    "img_pil": list_img_pil_resized[list_idx],
+                    "inpaint_pano_pil": list_inpaint_pano_pil[list_idx],
+                    "inpaint_mask_pil": list_mask_inpaint_resized[list_idx],
+                    "depth_origin": list_depth_origin_resized[list_idx],
+                    f"depth_inpainted_{suffix}": list_depth_inpainted[list_idx],
+                }
+                visualize_depth_inpainting(
+                    **kwargs,
+                    save_path=save_path_fn(i) / viz_filename,
+                )
+                my_utils.save_rgbd_ldi_pano(
+                    pano_rgb_bg=list_inpaint_pano_pil[list_idx],
+                    depth_bg=list_depth_inpainted[list_idx],
+                    mask_bg=list_mask_inpaint_resized[list_idx],
+                    dream=i,
+                    save_dir_=save_dir_,
+                    phase=phase_tag,
+                )
+            my_utils.printc(f"PHASE {phase_tag} SUCCESSFULLY COMPLETED!", color='green')
+
+        else:
+            my_utils.printc(f"SKIPPING PHASE {phase_tag}: LDI INPAINTING", color='magenta')
+            my_utils.printc(f"Loading instead from {load_phase_from}", color='magenta')
+            my_utils.copy_phase_folders(
+                source_dir=Path(config.save_dir) / load_phase_from,
+                dest_dir=Path(save_dir_),
+                phase=phase_tag,
+            )
+
+    else:
+        my_utils.printc(f"PHASE {phase_tag}: LDI INPAINTING NOT APPLIED AS PER CONFIGURATION", color='magenta')

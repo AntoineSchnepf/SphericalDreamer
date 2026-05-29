@@ -1,0 +1,7 @@
+expname: underwater_world
+num_dreams: 3
+prompt: A wide coral reef canyon extending forward and behind the observer, smooth
+  rock walls covered in coral and marine growth, vibrant yet softened colors including
+  turquoise, coral pink, and sandy beige, filtered underwater lighting with soft light
+  rays, floating particles in the water, calm immersive oceanic environment.
+save_dir: OUTPUTS/SphericalDreamer

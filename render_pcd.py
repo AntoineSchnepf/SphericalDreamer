@@ -175,7 +175,6 @@ def splat_with_z_buffer(colors, ldi_mask, depth_cam2, coord_cam2, height, width)
         - the interpolated_image (with interpolation)
         - the interpolated_depth (with interpolation)
     """
-    #TODO: better docstring
 
     # Basic checks
     assert colors.shape[-1] == 3

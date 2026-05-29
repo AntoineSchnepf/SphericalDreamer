@@ -41,13 +41,9 @@ if IN_BLENDER:
         printc, fetch_config_via_parser, setup,
     )
 
-_phase_1a = "1a"
-_phase_1b = "1b"
-_phase_2a = "2a"
-_phase_2b = "2b"
-_phase_2c = "2c"
-_phase_3 = "3"
-_phase_4 = "4"
+from pipeline.phases import PHASE_3
+
+_phase_3 = PHASE_3
 
 
 def parse_custom_world():
@@ -66,7 +62,7 @@ if IN_BLENDER:
     # -------------------------
     # Config
     # -------------------------
-    config = fetch_config_via_parser(debug=False, debug_parser_override=["--config", "exp0/0_caverns.yaml"])
+    config = fetch_config_via_parser(debug=False)
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = setup(config)
 
     cfg_render = config.phase5.render_settings
@@ -97,7 +93,7 @@ if IN_BLENDER:
         world_name = os.path.basename(WORLD_PATH)
         print(f"Using custom world (config): {WORLD_PATH}")
     else:
-        world_name = f"{_phase_3}_final_dream_pcd_unfiltered.ply"
+        world_name = f"{_phase_3}_world_pcd.ply"
         WORLD_PATH = save_dir_ / world_name
         WORLD_PATH = str(WORLD_PATH)
 
@@ -179,7 +175,7 @@ def main():
     from datetime import datetime
     world_basename = os.path.splitext(os.path.basename(WORLD_PATH))[0]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(config.save_dir, config.expname, "custom_outputs", world_basename, f"trajectory_{timestamp}")
+    output_dir = os.path.join(config.save_dir, config.expname, "blender_render", f"trajectory_{timestamp}")
     output_dir_eqr = os.path.join(output_dir, "rgb_eqr")
     os.makedirs(output_dir_eqr, exist_ok=True)
     print(f"Output directory: {output_dir}")

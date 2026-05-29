@@ -21,7 +21,7 @@ def get_harmonic_blending_mask(missing_info_mask):
     """
     missing_info_mask: np.array of shape [H, W] with dtype bool. True where info is missing i.e. where we inpainted
     """
-    # TODO: I think we should erode mask1 a bit. Make the boundary more "inside" mask1
+
     missing_info_mask = my_utils.dilate_mask(missing_info_mask, pixels=3)
     mask1 = ~missing_info_mask
     mask2 = missing_info_mask

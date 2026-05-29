@@ -1,57 +1,30 @@
 import os
-import warnings
-import logging
 import contextlib
 from io import StringIO
-
-# Disabling some warnings
-os.environ["GLOG_minloglevel"] = "2"
-os.environ["GLOG_logtostderr"] = "0"
-os.environ["CERES_MINIMIZER_PROGRESS_TO_STDOUT"] = "0"
-logging.disable(logging.CRITICAL + 1)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.simplefilter("ignore", FutureWarning)
+import pipeline.bootstrap  # noqa: F401 - sets GLOG env vars and filters warnings
 
 import sys
-import cv2
-from matplotlib import image
-from src.pipeline_flux import FluxPipeline
-from src.pipeline_flux_fill import FluxFillPipeline
-from diffusers import FluxControlNetModel
-from diffusers.pipelines import FluxControlNetPipeline
 import torch
 import numpy as np
-from PIL import Image, ImageOps
-import copy
 from functools import partial
 from scipy.ndimage import maximum_filter, minimum_filter
-import matplotlib.pyplot as plt
 import time
 import pickle as pkl
 from pathlib import Path
-import argparse
-from prodict import Prodict
-import pyfiglet
 import ldi_inpaiting as ldi
 
 # local imports
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
-sys.path.append(_360monodepth_install_dir) 
-from render_pcd import render_v2
 from harmonic_blending import harmonic_blend_of_depths_ldi, naive_blend_of_depths
 import my_utils
 from my_utils import printc
 with contextlib.redirect_stdout(StringIO()):
     from sphericaldreamer import SphericalDreamer
-    from utils.depth_alignment import Pano_depth_estimation
 
-_phase_1a = "1a"
-_phase_1b = "1b"
-_phase_2a = "2a"
-_phase_2b = "2b"
-_phase_2c = "2c"
+from pipeline.phases import PHASE_2A, PHASE_2B, PHASE_2C
 
-_phase_current = _phase_2c
+_phase_2a = PHASE_2A
+_phase_2b = PHASE_2B
+_phase_current = PHASE_2C
 
     
 def inpaint_depth(depth, image_bg, bg_mask, pipe_dp, rescale_to_min_depth=False, pad_width=None):
@@ -284,7 +257,6 @@ def align_new_points(
             ldi_mask = ldi_mask & ~where_ldi_depth_nan_resized
 
     # (Naive blending)
-    # TODO: (Antoine): I think the variable below should be inpainting_mask instead of missing_info_mask
     pcd_naive, blended_depth_naive = naive_blend_of_depths(
         colors=new_colors,
         warped_depth_interp=warped_depth_interp,
@@ -325,7 +297,6 @@ def align_new_points(
     return res
 
 def split_new_points(pts, colors, pose1, pose2, forward):
-    # (Antoine, 16 Oct) This function will pose problems if we want to do anything different than a straight line path.
     """
     Split points between points belonging to sphere1, sphere2, and neutral points.
     Points are distrbuted as follows:
@@ -390,10 +361,7 @@ def is_point_in_camera_forward_space(point_positions,
 
 
 if __name__ == "__main__":
-    config = my_utils.fetch_config_via_parser(
-        debug=False, 
-        debug_parser_override=["--config", "Antoine/F0_forest.yaml"]
-    )
+    config = my_utils.fetch_config_via_parser(debug=False)
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
     spherical_dreamer = SphericalDreamer(
@@ -604,7 +572,7 @@ if __name__ == "__main__":
                 pkl.dump(pointcloud_zoo, f)
 
         # END OF PHASE 2: final pcd save
-        with open(save_dir_  / f"{_phase_current}_raw_dream_pcd.pkl", 'wb') as f:
+        with open(save_dir_  / f"{_phase_current}_raw_world_pcd.pkl", 'wb') as f:
             pkl.dump(
                 my_utils.PointCloud(
                     pts=all_pts_world,

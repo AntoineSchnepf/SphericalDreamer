@@ -1,5 +1,4 @@
 
-import sys
 from src.pipeline_flux import FluxPipeline
 from src.pipeline_flux_fill import FluxFillPipeline
 from diffusers import FluxControlNetModel
@@ -11,8 +10,6 @@ import logging
 import contextlib
 from io import StringIO
 # local imports
-_360monodepth_install_dir = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src/"
-sys.path.append(_360monodepth_install_dir) 
 from utils.depth_alignment import Pano_depth_estimation
 from render_pcd import render_v2
 import my_utils
@@ -134,9 +131,9 @@ class SphericalDreamer:
     def init_inpainting_model(self):
 
         self.pano_inpaint_pipeline = FluxFillPipeline.from_pretrained("black-forest-labs/FLUX.1-Fill-dev", torch_dtype=torch.bfloat16)
-        # self.pano_inpaint_pipeline.load_lora_weights(self.flux_lora_pano_path) # Antoine: Do not use the lora for inpainting, it yields worse results. TODO: maybe verify this further
+        # self.pano_inpaint_pipeline.load_lora_weights(self.flux_lora_pano_path) # Antoine: Do not use the lora for inpainting, it yields worse results. 
         self.pano_inpaint_pipeline.enable_model_cpu_offload()
-        self.pano_inpaint_pipeline.enable_vae_tiling() #todo test with or without this?
+        self.pano_inpaint_pipeline.enable_vae_tiling() 
 
     @torch.no_grad()   
     def inpaint_pano(self, prompt, pano_rgb, mask, strength=1.0, height=None, width=None, seed_override=None):

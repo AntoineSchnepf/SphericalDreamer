@@ -116,10 +116,6 @@ def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=F
     parser.add_argument('--config', type=str, default="_default.yaml")
     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
 
-    # TODO: remove lines below
-    parser.add_argument('--img_name', type=str, default='FD0')
-    print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
-
     # Parse known args + keep the rest as overrides
     if debug:
         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
@@ -136,30 +132,6 @@ def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=F
 
     return config
 
-# Note: This is the old fetch_config_via_parser without override functionality
-# def fetch_config_via_parser(debug, debug_parser_override=[], return_img_name=False):
-#     repo_path = os.path.dirname(os.path.realpath(__file__))
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--config', type=str, default="_default.yaml")
-#     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
-#     # TODO: remove lines below
-#     parser.add_argument('--img_name', type=str, default='FD0')
-#     print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
-
-#     # ---- script args ----
-#     if debug:
-#         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")
-#         printc(debug_message, color="red")
-#         args = parser.parse_args(debug_parser_override)
-#     else:
-#         args = parser.parse_args()
-
-#     config = Prodict.from_dict(load_config(args.config, args.config_dir, from_default=True, default_cfg_name="_default.yaml"))
-    
-#     if return_img_name:
-#         return config, args.img_name
-    
-#     return config
 
 def setup(config):
     seeds = [config.seed + offset for offset in config.seed_offsets]
@@ -2043,72 +2015,69 @@ def rotation_matrix_z(theta):
 # --------------------------------------------#
 # ----   World Opening transformations -----  #
 # --------------------------------------------#
-#TODO: remove the functions: 
-# get_sphere_tangent, unfold_sphere_on_tangents
 
-
-def get_sphere_tangent(phi0, sph_points):
-        """
-        args:
-        :phi0: float, radians: point on the sphere where the tangent is computed
-        :sph_points: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates. Convention: theta, phi, r
+# def get_sphere_tangent(phi0, sph_points):
+#         """
+#         args:
+#         :phi0: float, radians: point on the sphere where the tangent is computed
+#         :sph_points: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates. Convention: theta, phi, r
         
-        returns: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates, projected onto the tangent at phi0
-        """
+#         returns: np.array w. shape [..., 3]: array of 3D points coordinates in spherical coordinates, projected onto the tangent at phi0
+#         """
 
-        theta, phi, r = sph_points[..., 0], sph_points[..., 1], sph_points[..., 2]
+#         theta, phi, r = sph_points[..., 0], sph_points[..., 1], sph_points[..., 2]
 
-        # normal expression at phi0:
-        X0 = r * np.cos(theta) * np.cos(phi0)
-        Y0 = r * np.cos(theta) * np.sin(phi0)
-        Z0 = r * np.sin (theta)
-        P0 = np.stack([X0, Y0, Z0], axis=-1)  # shape [3]
+#         # normal expression at phi0:
+#         X0 = r * np.cos(theta) * np.cos(phi0)
+#         Y0 = r * np.cos(theta) * np.sin(phi0)
+#         Z0 = r * np.sin (theta)
+#         P0 = np.stack([X0, Y0, Z0], axis=-1)  # shape [3]
 
-        # derivative w.r.t. phi at phi0:
-        dX_dphi0 = -r * np.cos(theta) * np.sin(phi0)
-        dY_dphi0 =  r * np.cos(theta) * np.cos(phi0)
-        dZ_dphi0 =  0.0 * r * np.sin (theta)
-        dP0 = np.stack([dX_dphi0, dY_dphi0, dZ_dphi0], axis=-1)  # shape [3]
+#         # derivative w.r.t. phi at phi0:
+#         dX_dphi0 = -r * np.cos(theta) * np.sin(phi0)
+#         dY_dphi0 =  r * np.cos(theta) * np.cos(phi0)
+#         dZ_dphi0 =  0.0 * r * np.sin (theta)
+#         dP0 = np.stack([dX_dphi0, dY_dphi0, dZ_dphi0], axis=-1)  # shape [3]
 
-        # get projection of (X,Y,Z) onto the tangent at phi0:
-        delta = angle_diff(phi, phi0) # shape [...]
-        projection = P0[None, :] + dP0[None, :] * delta[..., None]  # shape [..., 3]
-        #shape: [..., 3] = shape: [1, 3] + shape: [1, 3] * shape: [..., 1]
-        return carte2sph_3D(projection)
+#         # get projection of (X,Y,Z) onto the tangent at phi0:
+#         delta = angle_diff(phi, phi0) # shape [...]
+#         projection = P0[None, :] + dP0[None, :] * delta[..., None]  # shape [..., 3]
+#         #shape: [..., 3] = shape: [1, 3] + shape: [1, 3] * shape: [..., 1]
+#         return carte2sph_3D(projection)
 
-def unfold_sphere_on_tangents(pts_sph, forward_sph, delta=np.pi):
-    """
-    Unfold points in the spherical coordinates, by projecting them onto the sphere tangents
-    at the boundary of a cone of angle delta around forward_sph.
-    All arguments expected in spherical coordinates (theta, phi, r).
-    The returned points are also in spherical coordinates.
-    """
-    # a. Get the two boundary angles
-    phi_forward = forward_sph[1]
-    phi1 = normalize_angle(phi_forward + delta / 2)
-    phi2 = normalize_angle(phi_forward - delta / 2)
+# def unfold_sphere_on_tangents(pts_sph, forward_sph, delta=np.pi):
+#     """
+#     Unfold points in the spherical coordinates, by projecting them onto the sphere tangents
+#     at the boundary of a cone of angle delta around forward_sph.
+#     All arguments expected in spherical coordinates (theta, phi, r).
+#     The returned points are also in spherical coordinates.
+#     """
+#     # a. Get the two boundary angles
+#     phi_forward = forward_sph[1]
+#     phi1 = normalize_angle(phi_forward + delta / 2)
+#     phi2 = normalize_angle(phi_forward - delta / 2)
 
-    # b. gets arcs
-    arc1_bounds = (phi_forward, phi1)
-    arc2_bounds = (phi2, phi_forward)
-    arc1_mask = in_interval_mod(pts_sph[..., 1], arc1_bounds[0], arc1_bounds[1], closed='both')
-    arc2_mask = in_interval_mod(pts_sph[..., 1], arc2_bounds[0], arc2_bounds[1], closed='both')
-    other_mask = ~(arc1_mask | arc2_mask)
+#     # b. gets arcs
+#     arc1_bounds = (phi_forward, phi1)
+#     arc2_bounds = (phi2, phi_forward)
+#     arc1_mask = in_interval_mod(pts_sph[..., 1], arc1_bounds[0], arc1_bounds[1], closed='both')
+#     arc2_mask = in_interval_mod(pts_sph[..., 1], arc2_bounds[0], arc2_bounds[1], closed='both')
+#     other_mask = ~(arc1_mask | arc2_mask)
 
-    arc1_pts_sph = pts_sph[arc1_mask]
-    arc2_pts_sph = pts_sph[arc2_mask]
+#     arc1_pts_sph = pts_sph[arc1_mask]
+#     arc2_pts_sph = pts_sph[arc2_mask]
 
-    arc1_proj_pts_sph = get_sphere_tangent(phi1, arc1_pts_sph)
-    arc2_proj_pts_sph = get_sphere_tangent(phi2, arc2_pts_sph)
-    other_pts_sph = pts_sph[other_mask]
+#     arc1_proj_pts_sph = get_sphere_tangent(phi1, arc1_pts_sph)
+#     arc2_proj_pts_sph = get_sphere_tangent(phi2, arc2_pts_sph)
+#     other_pts_sph = pts_sph[other_mask]
 
 
-    res_sph = np.zeros_like(pts_sph)
-    res_sph[arc1_mask] = arc1_proj_pts_sph
-    res_sph[arc2_mask] = arc2_proj_pts_sph
-    res_sph[other_mask] = other_pts_sph
+#     res_sph = np.zeros_like(pts_sph)
+#     res_sph[arc1_mask] = arc1_proj_pts_sph
+#     res_sph[arc2_mask] = arc2_proj_pts_sph
+#     res_sph[other_mask] = other_pts_sph
 
-    return res_sph
+#     return res_sph
 
 def get_cylinder_tangent(theta0, cyl_points):
     """
@@ -3069,7 +3038,6 @@ def open_world_carte(forward_carte, pts_carte, opening_mode='cut+cylinder', delt
             pts_carte=pts_carte,
             cut_distance=cut_distance,
         )
-        # TODO: optimize performance here doing this init only once
         displacement_fn = build_disk_to_square_displacement_fn(
             center=(0.0, 0.0),
             radius=1.0,

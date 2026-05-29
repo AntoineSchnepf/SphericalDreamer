@@ -1431,10 +1431,6 @@ def fetch_config_via_parser(debug, debug_parser_override=None, return_img_name=F
     parser.add_argument('--config', type=str, default="_default.yaml")
     parser.add_argument('--config_dir', type=str, default=os.path.join(repo_path, "configs"))
 
-    # TODO: remove lines below
-    parser.add_argument('--img_name', type=str, default='FD0')
-    print("WARNING(Antoine): added a stuppid line in utils.py to run some quick exp. To remove later.")
-
     # Parse known args + keep the rest as overrides
     if debug:
         debug_message = pyfiglet.figlet_format("!Debug mode!", font="slant")

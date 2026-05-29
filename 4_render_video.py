@@ -1,30 +1,20 @@
 import os
-os.environ.setdefault("OPEN3D_HEADLESS", "1") # for open3d headless rendering
+os.environ.setdefault("OPEN3D_HEADLESS", "1")  # for open3d headless rendering
 import numpy as np
 import open3d as o3d
 import pickle
-import my_utils
-import numpy as np
-import open3d as o3d
 import time
-from my_utils import PointCloud
-from my_utils import set_camera_from_elev_azim, printc
+import my_utils
+from my_utils import PointCloud, set_camera_from_elev_azim, printc
 from tqdm import tqdm
 
-_phase_1a = "1a"
-_phase_1b = "1b"
-_phase_2a = "2a"
-_phase_2b = "2b"
-_phase_2c = "2c"
-_phase_3 = "3"
-_phase_4 = "4"
-_phase_current = _phase_4
+from pipeline.phases import PHASE_3, PHASE_4
+
+_phase_3 = PHASE_3
+_phase_current = PHASE_4
 
 if __name__ == "__main__":
-    config = my_utils.fetch_config_via_parser(
-        debug=False, 
-        debug_parser_override=["--config", "Antoine/debug.yaml"]
-    )
+    config = my_utils.fetch_config_via_parser(debug=False)
 
     seeds, width, height, save_dir_, pose_init, pose_end, translation_direction = my_utils.setup(config)
 
@@ -38,7 +28,7 @@ if __name__ == "__main__":
 
     # -------- Import pointcloud --------
     t0 = time.time()
-    with open(save_dir_ /f"{_phase_3}_final_dream_pcd.pkl", "rb") as f:
+    with open(save_dir_ /f"{_phase_3}_world_pcd_downsampled.pkl", "rb") as f:
         PointCloud_instance = pickle.load(f)
 
     pcd = PointCloud_instance.get_o3d_pointcloud()
@@ -82,8 +72,6 @@ if __name__ == "__main__":
 
     # Add geometries
     scene.add_geometry("filtered", pcd, mat)
-    if config.phase4.visualize_removed_points:
-        scene.add_geometry("removed", pcd, mat) 
 
     # -------- Camera control --------
     # Compute a basic bounding box and radius for scaling camera parameters
