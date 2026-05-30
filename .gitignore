@@ -1,7 +1,6 @@
 **__pycache__**
 OUTPUTS
-checkpoints
-.vscode
+checkpoints/*
 **.ply
 sphericaldreamer-1
 submodules
