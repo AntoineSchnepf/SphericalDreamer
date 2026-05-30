@@ -8,7 +8,10 @@
 
 | [Project Page](https://sphericaldreamer.github.io/) | [Paper](https://arxiv.org/abs/2605.19974) |
 
+
 **TL;DR:** SphericalDreamer creates large-scale, fully immersive 3D environments from text by generating and fusing multiple panoramic images into a coherent 3D world.
+
+<video src="assets/hero.mp4" controls autoplay loop muted width="100%"></video>
 
 **Abstract:** *The generation of immersive and navigable 3D environments is increasingly prevalent with the growing adoption of virtual reality and 3D content. However, recent methods face a fundamental limitation: they cannot produce 3D worlds that simultaneously (i) are navigable over long-range spatial extents and (ii) cover the complete omnidirectional field of view (360° horizontally and 180° vertically). To address this challenge, we introduce SphericalDreamer, a method for generating fully immersive and long-range 3D outdoor environments from textual prompts. Our approach is built on the generation of multiple panoramic images, which are subsequently lifted into 3D and fused together while maintaining visual and geometric consistency. SphericalDreamer produces highly detailed, fully immersive 3D environments, while substantially improving scale and navigability compared to prior approaches.*
 
