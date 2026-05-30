@@ -1,15 +1,16 @@
 # SphericalDreamer: Generating Navigable Immersive 3D Worlds with Panorama Fusion
+
 ### ICML 2026
+
 **Official paper implementation**
+
 > Antoine Schnepf, Karim Kassab, Flavian Vasile, Andrew Comport
 
 | [Project Page](https://sphericaldreamer.github.io/) | [Paper](https://arxiv.org/abs/2605.19974) |
 
-<video src="assets/hero.mov" autoplay loop muted playsinline width="100%"></video>
-
 **TL;DR:** SphericalDreamer creates large-scale, fully immersive 3D environments from text by generating and fusing multiple panoramic images into a coherent 3D world.
 
-<b>Abstract:</b> *The generation of immersive and navigable 3D environments is increasingly prevalent with the growing adoption of virtual reality and 3D content. However, recent methods face a fundamental limitation: they cannot produce 3D worlds that simultaneously (i) are navigable over long-range spatial extents and (ii) cover the complete omnidirectional field of view (360° horizontally and 180° vertically). To address this challenge, we introduce SphericalDreamer, a method for generating fully immersive and long-range 3D outdoor environments from textual prompts. Our approach is built on the generation of multiple panoramic images, which are subsequently lifted into 3D and fused together while maintaining visual and geometric consistency. SphericalDreamer produces highly detailed, fully immersive 3D environments, while substantially improving scale and navigability compared to prior approaches.*
+**Abstract:** *The generation of immersive and navigable 3D environments is increasingly prevalent with the growing adoption of virtual reality and 3D content. However, recent methods face a fundamental limitation: they cannot produce 3D worlds that simultaneously (i) are navigable over long-range spatial extents and (ii) cover the complete omnidirectional field of view (360° horizontally and 180° vertically). To address this challenge, we introduce SphericalDreamer, a method for generating fully immersive and long-range 3D outdoor environments from textual prompts. Our approach is built on the generation of multiple panoramic images, which are subsequently lifted into 3D and fused together while maintaining visual and geometric consistency. SphericalDreamer produces highly detailed, fully immersive 3D environments, while substantially improving scale and navigability compared to prior approaches.*
 
 ## Installation
 
@@ -18,7 +19,7 @@
 ### 1. Clone the repository
 
 ```bash
-git clone --recurse-submodules https://github.com/AntoineSchnepf/SphericalDreamer.git
+git clone https://github.com/AntoineSchnepf/SphericalDreamer.git
 cd SphericalDreamer
 ```
 
@@ -27,11 +28,6 @@ cd SphericalDreamer
 ```bash
 conda create -n sphericaldreamer python==3.9
 conda activate sphericaldreamer
-pip install -r requirements.txt
-pip install timm==0.4.12 --no-deps
-pip install xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu118
-pip install -e submodules/diff-gaussian-rasterization
-pip install -e submodules/simple-knn
 ```
 
 Install PyTorch (tested on `torch2.4.0+cu118`):
@@ -39,6 +35,19 @@ Install PyTorch (tested on `torch2.4.0+cu118`):
 ```bash
 pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu118
 ```
+
+Install other requirements:
+
+```bash
+pip install -r requirements.txt
+pip install timm==0.4.12 --no-deps
+pip install xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu118
+pip install natten==0.14.4 --trusted-host shi-labs.com -f https://shi-labs.com/natten/wheels/cu118/torch2.4.0/index.html
+pip install -e submodules/diff-gaussian-rasterization
+pip install -e submodules/simple-knn
+```
+
+
 
 ### 3. Install 360monodepth
 
@@ -105,7 +114,6 @@ Two renderers are supported for visualizing the generated 3D world:
   ```bash
   pip install open3d
   ```
-
 - **Blender** (optional) — required only for highest quality point cloud rendering (`5_render_blender.py`):
   ```bash
   mkdir -p ~/blender && cd ~/blender
@@ -115,7 +123,6 @@ Two renderers are supported for visualizing the generated 3D world:
   source ~/.bashrc
   cd -
   ```
-
   Then install the required packages into Blender's own Python interpreter:
   ```bash
   BLENDER_PY=$(blender --background --python-expr "import sys; print(sys.executable)" 2>/dev/null | tail -1)
@@ -134,12 +141,14 @@ checkpoints/
 └── depth_anything_v2_vitl.pth
 ```
 
-| Checkpoint | Download |
-|---|---|
+
+| Checkpoint                          | Download                                                                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pano_lora_720*1440_v1.safetensors` | [HuggingFace](https://huggingface.co/ysmikey/Layerpano3D-FLUX-Panorama-LoRA/resolve/main/lora_hubs/pano_lora_720*1440_v1.safetensors?download=true) |
-| `ControlNetLama.pth` | [HuggingFace](https://huggingface.co/lllyasviel/Annotators/resolve/main/ControlNetLama.pth?download=true) |
-| `sam_vit_h_4b8939.pth` | [Meta](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth) |
-| `depth_anything_v2_vitl.pth` | [HuggingFace](https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true) |
+| `ControlNetLama.pth`                | [HuggingFace](https://huggingface.co/lllyasviel/Annotators/resolve/main/ControlNetLama.pth?download=true)                                           |
+| `sam_vit_h_4b8939.pth`              | [Meta](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth)                                                                        |
+| `depth_anything_v2_vitl.pth`        | [HuggingFace](https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true)                  |
+
 
 ## Usage
 
@@ -158,6 +167,7 @@ The size of the generated world is controlled by the `num_dreams` entry in the c
 ## Citation
 
 If you find this research project useful, please consider citing our work:
+
 ```bibtex
 @article{schnepf2026sphericaldreamer,
   title={{SphericalDreamer: Generating Navigable Immersive 3D Worlds with Panorama Fusion}},
@@ -166,3 +176,4 @@ If you find this research project useful, please consider citing our work:
   year={2026}
 }
 ```
+

@@ -16,8 +16,7 @@ import sys
 import logging
 import warnings
 
-_MONODEPTH360_SRC_DEFAULT = "../LayerPano3D/submodules/360monodepth/code/python/src"
-# _MONODEPTH360_SRC_DEFAULT = "/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/python/src"
+_MONODEPTH360_SRC_DEFAULT = "./submodules/360monodepth/code/python/src"
 sys.path.append(os.environ.get("MONODEPTH360_SRC", _MONODEPTH360_SRC_DEFAULT))
 
 os.environ["GLOG_minloglevel"] = "2"
