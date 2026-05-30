@@ -1,0 +1,8 @@
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/rebuild_cache.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/edit_cache.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/test.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/EigenSolvers.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/unit_test.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/main.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/depthmapAlign_pymodule.dir
+/home/a.schnepf/phd/LayerPano3D/submodules/360monodepth/code/cpp/build/CMakeFiles/depth_stitch.dir

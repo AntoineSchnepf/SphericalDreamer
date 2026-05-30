@@ -2,16 +2,5 @@
 OUTPUTS
 checkpoints
 .vscode
-tmp
-wandb
-submodules
 **.ply
-tests
-temp_run_blender.sh
-temp_run_nerfstudio.sh
-cuda_installer.pyz
-driver_installer.run
-Figures
-viz_ply_pointclouds
-BASELINES_INPUT_IMGS
-src/libsvm-python/
+sphericaldreamer-1
